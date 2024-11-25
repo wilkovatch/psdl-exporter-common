@@ -1339,8 +1339,11 @@ class PSDLWriter:
             typ = self.utils.get_object_type(bp.geo)
             if bool(int(self.utils.get_property(prop, "echo", "0"))):
                 self.block_flags[bi].f2 = 1
-            elif bool(int(self.utils.get_property(prop, "bridge", "0"))):
-                bp.mat_id = 65535
+            #elif bool(int(self.utils.get_property(prop, "bridge", "0"))):
+                #bp.mat_id = 65535  # <- SuperSecret doesn't remember
+                                    # what this is for (~PD)
+                #self.block_flags[bi].f7 = 1
+            elif bool(int(self.utils.get_property(prop, "warp", "0"))):
                 self.block_flags[bi].f7 = 1
             if bp.mat_id != 0:
                 ml = []
