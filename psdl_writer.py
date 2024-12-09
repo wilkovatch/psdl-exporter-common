@@ -1,6 +1,5 @@
 import math
 import numpy as np
-import os
 import sys
 
 from .scene_input import SceneInput
@@ -1340,17 +1339,13 @@ class PSDLWriter:
             typ = self.utils.get_object_type(bp.geo)
             if bool(int(self.utils.get_property(prop, "echo", "0"))):
                 self.block_flags[bi].f2 = 1
-            elif bool(int(self.utils.get_property(prop, "warp", "0"))):
+            if bool(int(self.utils.get_property(prop, "warp", "0"))):
                 self.block_flags[bi].f7 = 1
-                if os.environ.get('CHICAGO_BRIDGE_PSDL_FIX', '') != '':
-                  # Fix for rooms with bridges in Chicago, see SuperSecret's
-                  # message from 2024-11-27 in the Discord channel. Can brake
-                  # other maps. Set the environment variable with some content
-                  # to enable.
-                  bp.mat_id = 65535
+            if bool(int(self.utils.get_property(prop, "disable", "0"))):
+                bp.mat_id = -1
             if bp.mat_id != 0:
                 ml = []
-                if bp.mat_id == 65535:
+                if bp.mat_id == -1:
                     ml.append(self.convert_to_attr(0, 10, 0))
                     ml.append(0)
                     self.shorts_lists.append(ml)
