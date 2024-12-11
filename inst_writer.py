@@ -11,23 +11,29 @@ class INSTWriter:
         self.filepath = filepath
         self.utils = Utils(self.scene_input)
 
-    def process_elem(self, obj):
-        file = self.file
+    def process_inst_elem(self, obj):
         rot = self.scene_input.get_rotation(obj)
         pr = self.scene_input.get_property_container(obj)
-        rx = rot[0]
-        rz = rot[1]
-        ry = rot[2]
-        if ry == 0:
-            ry = 0.0000000001  # else MM2 crashes for some reason
         scalex = self.scene_input.get_scale(obj)[0]
         scalez = self.scene_input.get_scale(obj)[2] #TODO: fix name (this is the vertical)
         scaley = self.scene_input.get_scale(obj)[1]
         origo = self.scene_input.get_position(obj)
         iblock = self.utils.get_block_number(obj)
-        ib = self.utils.get_real_block_number(self.blocks, iblock)
-        flags = int(self.utils.get_property(pr, "flags", 0))
         obj_name = pr["object"]
+        flags = int(pr.get("flags", 0))
+        self.export_elem(rot, scalex, scaley, scalez, origo, iblock, obj_name)
+
+    def process_pkg_elem(self, obj):
+        pass
+
+    def export_elem(self, rot, scalex, scaley, scalez, origo, iblock, obj_name):
+        file = self.file
+        rx = rot[0]
+        rz = rot[1]
+        ry = rot[2]
+        if ry == 0:
+            ry = 0.0000000001  # else MM2 crashes for some reason
+        ib = self.utils.get_real_block_number(self.blocks, iblock)
         file.write_uint16(ib + 1)
         file.write_uint16(flags)
         if (abs(1.0 - scalex) < 0.0001 and
@@ -71,6 +77,8 @@ class INSTWriter:
         for obj in self.scene_input.get_object_list():
             typ = self.utils.get_object_type(obj)
             if typ == "INST":
-                self.process_elem(obj)
+                self.process_inst_elem(obj)
+            elif typ == "PKG":
+                self.process_pkg_elem(obj)
         self.file.close()
         print("INST exported!")

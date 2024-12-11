@@ -14,9 +14,6 @@ class Utils:
         obj_name = self.scene_input.get_object_name(obj)
         return obj_name.split(",")[-1].split("_")[1].split(".")[0]
 
-    def get_property(self, obj, key, default):
-        return obj[key] if key in obj else default
-
     def get_real_blocks(self):
         blocks2 = []
         n_blocks = max(self.get_block_number(obj) for obj in self.scene_input.get_object_list())

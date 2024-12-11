@@ -3,6 +3,7 @@ from .psdl_writer import PSDLWriter
 from .inst_writer import INSTWriter
 from .bai_writer import BAIWriter
 from .pathset_writer import PATHSETWriter
+from .pkg_writer import PKGWriter
 
 class MainWriter:
     def __init__(self,
@@ -12,6 +13,7 @@ class MainWriter:
                  write_inst,
                  write_bai,
                  write_pathset,
+                 write_pkgs,
                  split_non_coplanar_roads,
                  accurate_bai_culling,
                  cap_materials):
@@ -21,6 +23,7 @@ class MainWriter:
         self.write_inst = write_inst
         self.write_bai = write_bai
         self.write_pathset = write_pathset
+        self.write_pkgs = write_pkgs
         self.split_non_coplanar_roads = split_non_coplanar_roads
         self.accurate_bai_culling = accurate_bai_culling
         self.cap_materials = cap_materials
@@ -37,4 +40,7 @@ class MainWriter:
             writer.write()
         if self.write_pathset:
             writer = PATHSETWriter(self.scene_input, self.filepath)
+            writer.write()
+        if self.write_pkgs:
+            writer = PKGWriter(self.scene_input, self.filepath)
             writer.write()

@@ -314,7 +314,7 @@ class BAIWriter:
             sec_count = int(rd_pr["vertices_per_section"])
             n_sections = self.scene_input.get_vertices_num(rd) // sec_count
             file.write_uint16(n_sections)
-            speed_value = int(self.utils.get_property(rd_pr, "speed", 0))
+            speed_value = int(rd_pr.get("speed", 0))
             file.write_uint16(speed_value)
             file.write_uint16(len(rd_blocks))
             for rdb in rd_blocks:

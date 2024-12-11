@@ -53,7 +53,7 @@ class PSDLWriter:
         max_v = 0
         if bname in ["FACB", "FAC", "SLIVER"]:
             max_v = 2
-        elif bname in ["RAIL", "RAILC", "INST", "BAI", "PTH"]:
+        elif bname in ["RAIL", "RAILC", "INST", "BAI", "PTH", "PKG"]:
             max_v = 0
         else:
             max_v = self.scene_input.get_vertices_num(obj)
@@ -100,7 +100,7 @@ class PSDLWriter:
             bname = self.utils.get_object_type(obj)
             vert_num = self.scene_input.get_vertices_num(obj)
             poly_num = self.scene_input.get_polygons_num(obj)
-            has_geometry = bname not in ["INST", "BAI", "PTH"] and (bname == "RAIL" or (vert_num > 0 and poly_num > 0))
+            has_geometry = bname not in ["INST", "BAI", "PTH", "PKG"] and (bname == "RAIL" or (vert_num > 0 and poly_num > 0))
             if has_geometry:
                 n = self.utils.get_block_number(obj)
                 blocks_temp[n-1].append(Attribute(geo=obj, mat_id=0))
@@ -479,13 +479,13 @@ class PSDLWriter:
         excl_v = []
         block_index = self.utils.get_block_number(the_block[0].geo)
         prop = self.scene_input.get_property_container(the_block[0].geo)
-        orig_obj_name = self.utils.get_property(prop, "original_name", None)
+        orig_obj_name = prop.get("original_name", None)
         orig_obj_msg = ''
         if orig_obj_name is not None:
             orig_obj_msg = ' (object ' +  orig_obj_name + ')'
         new_block = self.scene_input.create_composed_mesh()
         for b in the_block:
-            not_on_perimeter = bool(int(self.utils.get_property(b.geo, "not_on_perimeter", "0")))
+            not_on_perimeter = bool(int(b.geo.get("not_on_perimeter", "0")))
             thisbname = self.utils.get_object_type(b.geo)
             if not not_on_perimeter:
                 if thisbname not in ["FACB", "FAC", "RAIL", "RAILC", "SLIVER", "ROOF"]:
@@ -837,7 +837,7 @@ class PSDLWriter:
     def process_part_roads(self, b, bi, bp, bpi, last):
         # Road with sidewalk
         prop = self.scene_input.get_property_container(bp.geo)
-        prop_rule = self.utils.get_property(prop, "prop_rule", None)
+        prop_rule = prop.get("prop_rule", None)
         if prop_rule is not None:
             self.prop_blocks.append(bi)
             self.prop_rules[bi] = int(prop_rule)
@@ -853,8 +853,8 @@ class PSDLWriter:
             a_section.append(v)
         ended = False
         sectsdone = 0
-        do_not_split = bool(int(self.utils.get_property(prop, "no_coplanar_fix", "0")))
-        coplanar_fix_reverse = bool(int(self.utils.get_property(prop, "coplanar_fix_reverse", "0")))
+        do_not_split = bool(int(prop.get("no_coplanar_fix", "0")))
+        coplanar_fix_reverse = bool(int(prop.get("coplanar_fix_reverse", "0")))
         if self.split_non_coplanar_roads and not do_not_split:
             # Split non-coplanar roads in two triangular pieces to avoid bounding problems
             while not ended:
@@ -960,7 +960,7 @@ class PSDLWriter:
             a_section.append(v)
         ended = False
         sectsdone = 0
-        do_not_split = bool(int(self.utils.get_property(prop, "no_coplanar_fix", "0")))
+        do_not_split = bool(int(prop.get("no_coplanar_fix", "0")))
         if self.split_non_coplanar_roads and not do_not_split:
             # Split non-coplanar roads in two triangular pieces to avoid bounding problems
             while not ended:
@@ -1035,7 +1035,7 @@ class PSDLWriter:
     def process_part_roadd_roaddn(self, b, bi, bp, bpi, last):
         # Divided road with and without sidewalk
         prop = self.scene_input.get_property_container(bp.geo)
-        prop_rule = self.utils.get_property(prop, "prop_rule", None)
+        prop_rule = prop.get("prop_rule", None)
         typ = self.utils.get_object_type(bp.geo)
         if typ == "ROADD" and prop_rule is not None:
             self.prop_blocks.append(bi)
@@ -1337,11 +1337,11 @@ class PSDLWriter:
             if bpi == (len(b) - 1):
                 last = 1
             typ = self.utils.get_object_type(bp.geo)
-            if bool(int(self.utils.get_property(prop, "echo", "0"))):
+            if bool(int(prop.get("echo", "0"))):
                 self.block_flags[bi].f2 = 1
-            if bool(int(self.utils.get_property(prop, "warp", "0"))):
+            if bool(int(prop.get("warp", "0"))):
                 self.block_flags[bi].f7 = 1
-            if bool(int(self.utils.get_property(prop, "disable", "0"))):
+            if bool(int(prop.get("disable", "0"))):
                 bp.mat_id = -1
             if bp.mat_id != 0:
                 ml = []
