@@ -21,12 +21,12 @@ class INSTWriter:
         iblock = self.utils.get_block_number(obj)
         obj_name = pr["object"]
         flags = int(pr.get("flags", 0))
-        self.export_elem(rot, scalex, scaley, scalez, origo, iblock, obj_name)
+        self.export_elem(rot, scalex, scaley, scalez, origo, iblock, obj_name, flags)
 
     def process_pkg_elem(self, obj):
         pass
 
-    def export_elem(self, rot, scalex, scaley, scalez, origo, iblock, obj_name):
+    def export_elem(self, rot, scalex, scaley, scalez, origo, iblock, obj_name, flags):
         file = self.file
         rx = rot[0]
         rz = rot[1]
