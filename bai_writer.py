@@ -1,3 +1,5 @@
+# Info here: https://github.com/Dummiesman/angel-file-formats/blob/master/Midtown%20Madness%202/BAI.md
+
 import numpy as np
 
 from .scene_input import SceneInput
@@ -49,84 +51,105 @@ class BAIWriter:
             vertices_sum = np.add(vertices_sum, self.scene_input.get_vertex(IS, i))
         return np.divide(vertices_sum, verts_num)
 
-    def write_road_end(self, rd, EoS):
-        rd_pr = self.prop(rd)
+    def write_road_end(self, road, end_index):
+        road_properties = self.prop(road)
         file = self.file
-        EoS2 = 1 if EoS == 0 else 0
-        rd_iss = [rd_pr["start_intersection"], rd_pr["end_intersection"]]
-        rd_rls = [rd_pr["start_rule"], rd_pr["end_rule"]]
-        isind = -1
-        iind = -1
-        this_r_id = rd_pr["id"]
-        bid = rd_iss[EoS]
-        if bid == "0":
-            rd_iss[EoS] = rd_iss[EoS2]
-            rd_rls[EoS] = rd_rls[EoS2]
-            isind = 3452816845  # cdcdcdcd
+        road_intersections = [road_properties["start_intersection"], road_properties["end_intersection"]]
+        road_rules = [road_properties["start_rule"], road_properties["end_rule"]]
+        index_in_intersection = -1
+        intersection_index = -1
+        this_road_id = road_properties["id"]
+        block_id = road_intersections[end_index]
+        if block_id == "0":
+            # disconnected road
+            road_rule = "2"
+            index_in_intersection = 3452816845  # cdcdcdcd
         else:
-            IS = None
-            for iISt in range(len(self.intersections_finished)):
-                ISt = self.intersections_finished[iISt]
-                if bid == self.prop(ISt)["block"]:
-                    IS = ISt
-                    iind = iISt
-            IS_roads = self.prop(IS)["roads"].split(";")
-            for i in range(len(IS_roads)):
-                if IS_roads[i] == this_r_id:
-                    isind = i
-            file.write_uint32(iind)
-            file.write_uint16(52685)  # cdcd
-            file.write_uint32(int(rd_rls[EoS]))
-            file.write_uint32(isind)
-            if rd_rls[EoS] == "1":
-                this_road_ok = False
-                isind3 = isind + 2
-                if isind3 >= len(IS_roads):
-                    isind3 -= len(IS_roads)
-                while not this_road_ok:
-                    rid = IS_roads[isind3]
-                    r2 = None
-                    for rt in self.roads_finished:
-                        if rid == self.prop(rt)["id"]:
-                            r2 = rt
-                    r2_p = self.prop(r2)
-                    n_lanes_test_A = r2_p["left_lanes"]
-                    n_lanes_test_B = r2_p["right_lanes"]
-                    sidew_yn = self.get_sidew_yn(r2_p["has_sidewalks"])
-                    traf_type = int(r2_p["traffic_type"])
-                    if traf_type == 3 and (n_lanes_test_A == "0" or n_lanes_test_B == "0"):
-                        isind3 += 1
-                        if isind3 >= len(IS_roads):
-                            isind3 -= len(IS_roads)
-                    else:
-                        this_road_ok = True
-                litdir = 1 if r2_p["end_intersection"] == bid else 0
-                r2n = int(r2_p["vertices_per_section"])
-                vo1 = [0.0, 0.0, 0.0]
-                vo2 = [0.0, 0.0, 0.0]
-                if litdir == 1:
-                    vo1 = self.scene_input.get_vertex(r2, -r2n + sidew_yn[1])
-                    vo2 = self.scene_input.get_vertex(r2, -r2n)
+            road_rule = road_rules[end_index]
+
+            # Find the intersection
+            intersection = None
+            for i in range(len(self.intersections_finished)):
+                temp_intersection = self.intersections_finished[i]
+                if block_id == self.prop(temp_intersection)["block"]:
+                    intersection = temp_intersection
+                    intersection_index = i
+            intersection_roads = self.prop(intersection)["roads"].split(";")
+
+            # Find the index of this road in the intersection
+            for i in range(len(intersection_roads)):
+                if intersection_roads[i] == this_road_id:
+                    index_in_intersection = i
+
+        # Write the road end
+        file.write_uint32(intersection_index)
+        file.write_uint16(52685)  # cdcd
+        file.write_uint32(int(road_rule))
+        file.write_uint32(index_in_intersection)
+
+        if road_rules[end_index] == "1":
+            # Automatic traffic lights placement
+            # They are placed on the opposite road (as in MM2)
+            # (it actually uses the road with index+2, so only
+            # for intersections with 4 roads it's the opposite.
+            # It also excludes roads without traffic from the count.)
+
+            # Find the opposite road
+            this_road_ok = False
+            opposite_road_index = index_in_intersection + 2
+            if opposite_road_index >= len(intersection_roads):
+                # Avoid overflow
+                opposite_road_index -= len(intersection_roads)
+            while not this_road_ok:
+                # Check the current road
+                i = intersection_roads[opposite_road_index]
+                road_2 = None
+                for temp_road in self.roads_finished:
+                    if i == self.prop(temp_road)["id"]:
+                        road_2 = temp_road
+                road_2_properties = self.prop(road_2)
+                n_lanes_A = road_2_properties["left_lanes"]
+                n_lanes_B = road_2_properties["right_lanes"]
+                sides_have_sidewalks = self.get_sidew_yn(road_2_properties["has_sidewalks"])
+                traf_type = int(road_2_properties["traffic_type"])
+                if traf_type == 3 and (n_lanes_A == "0" or n_lanes_B == "0"):
+                    # Skip roads without traffic
+                    opposite_road_index += 1
+                    if opposite_road_index >= len(intersection_roads):
+                        opposite_road_index -= len(intersection_roads)
                 else:
-                    vo1 = self.scene_input.get_vertex(r2, r2n - sidew_yn[0] - 1)
-                    vo2 = self.scene_input.get_vertex(r2, r2n - 1)
-                vo = np.divide(np.add(np.multiply(vo1, 3), vo2), 4)
-                file.write_vec3(vo)
-                r1n = int(rd_pr["vertices_per_section"])
-                oA = [0.0, 0.0, 0.0]
-                oB = [0.0, 0.0, 0.0]
-                if EoS == 0:
-                    oA = self.scene_input.get_vertex(rd, r1n - 1)
-                    oB = self.scene_input.get_vertex(rd, 0)
-                elif EoS == 1:
-                    oA = self.scene_input.get_vertex(rd, -r1n)
-                    oB = self.scene_input.get_vertex(rd, -1)
-                vd0 = self.vector_projection(oA, oB, vo)
-                vd = self.rot_point(vd0, vo, 90.0)
-                file.write_vec3(vd)
+                    # Opposite road found
+                    this_road_ok = True
+
+            # Place the traffic light
+            light_dir = 1 if road_2_properties["end_intersection"] == block_id else 0
+            road_2_vps = int(road_2_properties["vertices_per_section"])
+            vo1 = [0.0, 0.0, 0.0]
+            vo2 = [0.0, 0.0, 0.0]
+            if light_dir == 1:
+                vo1 = self.scene_input.get_vertex(road_2, -road_2_vps + sides_have_sidewalks[1])
+                vo2 = self.scene_input.get_vertex(road_2, -road_2_vps)
             else:
-                for i in range(6):
-                    file.write_float(0.0)
+                vo1 = self.scene_input.get_vertex(road_2, road_2_vps - sides_have_sidewalks[0] - 1)
+                vo2 = self.scene_input.get_vertex(road_2, road_2_vps - 1)
+            vo = np.divide(np.add(np.multiply(vo1, 3), vo2), 4)
+            file.write_vec3(vo)
+            road_1_vps = int(road_properties["vertices_per_section"])
+            oA = [0.0, 0.0, 0.0]
+            oB = [0.0, 0.0, 0.0]
+            if end_index == 0:
+                oA = self.scene_input.get_vertex(road, road_1_vps - 1)
+                oB = self.scene_input.get_vertex(road, 0)
+            elif end_index == 1:
+                oA = self.scene_input.get_vertex(road, -road_1_vps)
+                oB = self.scene_input.get_vertex(road, -1)
+            vd0 = self.vector_projection(oA, oB, vo)
+            vd = self.rot_point(vd0, vo, 90.0)
+            file.write_vec3(vd)
+        else:
+            # Empty data for (unused) traffic lights
+            for i in range(6):
+                file.write_float(0.0)
 
     def write_road_data(self, rd, LoR):
         # Left 0
