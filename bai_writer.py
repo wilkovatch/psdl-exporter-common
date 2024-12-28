@@ -28,15 +28,17 @@ class BAIWriter:
         C = np.multiply(np.dot(A, NB), NB)
         return np.add(C, oA)
 
-    def rot_point(self, pR, pC, ang):
-        theta = np.deg2rad(ang)
-        cosTheta = math.cos(theta)
-        sinTheta = math.sin(theta)
-        X = (cosTheta * (pR[0] - pC[0])) - (sinTheta * (pR[1] - pC[1])) + pC[0]
-        Y = (sinTheta * (pR[0] - pC[0])) + (cosTheta * (pR[1] - pC[1])) + pC[1]
+    def rotate_point(self, point_to_rotate, center_point, angle):
+        pR = point_to_rotate
+        pC = center_point
+        theta = np.deg2rad(angle)
+        cos_theta = math.cos(theta)
+        sin_theta = math.sin(theta)
+        X = (cos_theta * (pR[0] - pC[0])) - (sin_theta * (pR[1] - pC[1])) + pC[0]
+        Y = (sin_theta * (pR[0] - pC[0])) + (cos_theta * (pR[1] - pC[1])) + pC[1]
         return [X, Y, pR[2]]
 
-    def get_sidew_yn(self, value):
+    def get_which_sides_have_sidewawlks(self, value):
         if ":" in value:
             parts = value.split(":")
             return [int(parts[0]), int(parts[1])]
@@ -110,7 +112,7 @@ class BAIWriter:
                 road_2_properties = self.prop(road_2)
                 n_lanes_A = road_2_properties["left_lanes"]
                 n_lanes_B = road_2_properties["right_lanes"]
-                sides_have_sidewalks = self.get_sidew_yn(road_2_properties["has_sidewalks"])
+                sides_have_sidewalks = self.get_which_sides_have_sidewawlks(road_2_properties["has_sidewalks"])
                 traf_type = int(road_2_properties["traffic_type"])
                 if traf_type == 3 and (n_lanes_A == "0" or n_lanes_B == "0"):
                     # Skip roads without traffic
@@ -144,79 +146,77 @@ class BAIWriter:
                 oA = self.scene_input.get_vertex(road, -road_1_vps)
                 oB = self.scene_input.get_vertex(road, -1)
             vd0 = self.vector_projection(oA, oB, vo)
-            vd = self.rot_point(vd0, vo, 90.0)
+            vd = self.rotate_point(vd0, vo, 90.0)
             file.write_vec3(vd)
         else:
             # Empty data for (unused) traffic lights
             for i in range(6):
                 file.write_float(0.0)
 
-    def write_road_data(self, rd, LoR):
-        # Left 0
-        # Right 1
+    def write_road_data(self, rd, is_right_side):
         rd_pr = self.scene_input.get_property_container(rd)
         file = self.file
-        rn = int(rd_pr["vertices_per_section"])
-        sidew_yn = self.get_sidew_yn(rd_pr["has_sidewalks"])[LoR]
+        vps = int(rd_pr["vertices_per_section"])
+        this_side_has_sidewalks = self.get_which_sides_have_sidewawlks(rd_pr["has_sidewalks"])[1 if is_right_side else 0] > 0
         traffic_type = int(rd_pr["traffic_type"])
-        n_sections = self.scene_input.get_vertices_num(rd) // rn
-        n_lanes = int(rd_pr["left_lanes"] if LoR else rd_pr["right_lanes"])
+        n_sections = self.scene_input.get_vertices_num(rd) // vps
+        n_lanes = int(rd_pr["left_lanes"] if is_right_side else rd_pr["right_lanes"])
         if n_lanes == 0:
             if traffic_type == 0 or traffic_type == 1:
                 traffic_type = 1
             else:
                 traffic_type = 3
-        n_lanes_b = int(rd_pr["right_lanes"] if LoR else rd_pr["left_lanes"])
+        n_lanes_other_side = int(rd_pr["right_lanes"] if is_right_side else rd_pr["left_lanes"])
         file.write_uint16(n_lanes)
         file.write_uint16(0)
         file.write_uint16(0)
         file.write_uint16(1)
         file.write_uint16(traffic_type)
         lanes = []
-        ns_range = range(0, n_sections)
-        if LoR == 1:
-            ns_range = list(reversed(ns_range))
+        n_sections_range = range(0, n_sections)
+        if is_right_side:
+            n_sections_range = list(reversed(n_sections_range))
         for i in range(n_lanes):
             lane = []
-            for i2 in ns_range:
+            for i2 in n_sections_range:
                 v1 = [0.0, 0.0, 0.0]
                 v2 = [0.0, 0.0, 0.0]
-                if sidew_yn == 1:
-                    if rn == 6:
-                        x = -2 if LoR == 1 else 0
-                        v1 = self.scene_input.get_vertex(rd, i2 * rn + 3 + x)
-                        v2 = self.scene_input.get_vertex(rd, i2 * rn + 4 + x)
+                if this_side_has_sidewalks:
+                    if vps == 6:
+                        x = -2 if is_right_side else 0
+                        v1 = self.scene_input.get_vertex(rd, i2 * vps + 3 + x)
+                        v2 = self.scene_input.get_vertex(rd, i2 * vps + 4 + x)
                     else:
-                        if LoR == 1:
-                            if n_lanes_b == 0:
-                                v2 = self.scene_input.get_vertex(rd, i2 * rn + 2)
+                        if is_right_side:
+                            if n_lanes_other_side == 0:
+                                v2 = self.scene_input.get_vertex(rd, i2 * vps + 2)
                             else:
-                                v2 = np.divide(np.add(self.scene_input.get_vertex(rd, i2 * rn + 1), self.scene_input.get_vertex(rd, i2 * rn + 2)), 2)
-                            v1 = self.scene_input.get_vertex(rd, i2 * rn + 1)
+                                v2 = np.divide(np.add(self.scene_input.get_vertex(rd, i2 * vps + 1), self.scene_input.get_vertex(rd, i2 * vps + 2)), 2)
+                            v1 = self.scene_input.get_vertex(rd, i2 * vps + 1)
                         else:
-                            if n_lanes_b == 0:
-                                v1 = self.scene_input.get_vertex(rd, i2 * rn + 1)
+                            if n_lanes_other_side == 0:
+                                v1 = self.scene_input.get_vertex(rd, i2 * vps + 1)
                             else:
-                                v1 = np.divide(np.add(self.scene_input.get_vertex(rd, i2 * rn + 1), self.scene_input.get_vertex(rd, i2 * rn + 2)), 2)
-                            v2 = self.scene_input.get_vertex(rd, i2 * rn + 2)
+                                v1 = np.divide(np.add(self.scene_input.get_vertex(rd, i2 * vps + 1), self.scene_input.get_vertex(rd, i2 * vps + 2)), 2)
+                            v2 = self.scene_input.get_vertex(rd, i2 * vps + 2)
                 else:
-                    if rn == 4:
-                        x = -2 if LoR == 1 else 0
-                        v1 = self.scene_input.get_vertex(rd, i2 * rn + 2 + x)
-                        v2 = self.scene_input.get_vertex(rd, i2 * rn + 3 + x)
+                    if vps == 4:
+                        x = -2 if is_right_side else 0
+                        v1 = self.scene_input.get_vertex(rd, i2 * vps + 2 + x)
+                        v2 = self.scene_input.get_vertex(rd, i2 * vps + 3 + x)
                     else:
-                        if LoR == 1:
-                            if n_lanes_b == 0:
-                                v2 = self.scene_input.get_vertex(rd, i2 * rn + 1)
+                        if is_right_side:
+                            if n_lanes_other_side == 0:
+                                v2 = self.scene_input.get_vertex(rd, i2 * vps + 1)
                             else:
-                                v2 = np.divide(np.add(self.scene_input.get_vertex(rd, i2 * rn), self.scene_input.get_vertex(rd, i2 * rn + 1)), 2)
-                            v1 = self.scene_input.get_vertex(rd, i2 * rn)
+                                v2 = np.divide(np.add(self.scene_input.get_vertex(rd, i2 * vps), self.scene_input.get_vertex(rd, i2 * vps + 1)), 2)
+                            v1 = self.scene_input.get_vertex(rd, i2 * vps)
                         else:
-                            if n_lanes_b == 0:
-                                v1 = self.scene_input.get_vertex(rd, i2 * rn)
+                            if n_lanes_other_side == 0:
+                                v1 = self.scene_input.get_vertex(rd, i2 * vps)
                             else:
-                                v1 = np.divide(np.add(self.scene_input.get_vertex(rd, i2 * rn), self.scene_input.get_vertex(rd, i2 * rn + 1)), 2)
-                            v2 = self.scene_input.get_vertex(rd, i2 * rn + 1)
+                                v1 = np.divide(np.add(self.scene_input.get_vertex(rd, i2 * vps), self.scene_input.get_vertex(rd, i2 * vps + 1)), 2)
+                            v2 = self.scene_input.get_vertex(rd, i2 * vps + 1)
                 v3 = [0.0, 0.0, 0.0]
                 vT = np.divide(np.subtract(v2, v1), n_lanes)
                 vT2 = np.multiply(vT, i + 0.5)
@@ -224,7 +224,7 @@ class BAIWriter:
                 lane.append(v3)
             lanes.append(lane)
         dists = []
-        if LoR == 1:
+        if is_right_side:
             lanes = list(reversed(lanes))  # affects behaviour at intersections
         for l in lanes:
             tot_dist = 0.0
@@ -236,13 +236,13 @@ class BAIWriter:
                     tot_dist += self.verts_distance(v1, v2)
                 file.write_float(tot_dist)
         tot_dist = 0.0
-        for i in ns_range:
-            x = -1 if LoR == 1 else 0
-            y = 1 if LoR == 1 else -1
-            v1 = self.scene_input.get_vertex(rd, (i - x) * rn + x)
-            v2 = self.scene_input.get_vertex(rd, (i - x) * rn + x)
-            if i != ns_range[0]:
-                v2 = self.scene_input.get_vertex(rd, (i + y - x) * rn + x)
+        for i in n_sections_range:
+            x = -1 if is_right_side else 0
+            y = 1 if is_right_side else -1
+            v1 = self.scene_input.get_vertex(rd, (i - x) * vps + x)
+            v2 = self.scene_input.get_vertex(rd, (i - x) * vps + x)
+            if i != n_sections_range[0]:
+                v2 = self.scene_input.get_vertex(rd, (i + y - x) * vps + x)
                 tot_dist += self.verts_distance(v1, v2)
             file.write_float(tot_dist)
         for i in range(n_lanes + 5):
@@ -256,10 +256,10 @@ class BAIWriter:
         sw_m = []
         sw_o = []
         for i in range(n_sections):
-            x = 1 if LoR == 1 else 0
-            y = 0 if sidew_yn == 0 else (1 if LoR == 1 else -1)
-            v1 = self.scene_input.get_vertex(rd, (i - x + 1) * rn + x - 1)
-            v2 = self.scene_input.get_vertex(rd, (i - x + 1) * rn + x + y - 1)
+            x = 1 if is_right_side else 0
+            y = 0 if not this_side_has_sidewalks else (1 if is_right_side else -1)
+            v1 = self.scene_input.get_vertex(rd, (i - x + 1) * vps + x - 1)
+            v2 = self.scene_input.get_vertex(rd, (i - x + 1) * vps + x + y - 1)
             v3 = np.divide(np.add(v1, v2), 2)
             sw_i.append(v2)
             sw_o.append(v1)
@@ -272,6 +272,8 @@ class BAIWriter:
             file.write_vec3(v)
 
     def get_bounding_box(self, vertices, add):
+        # Returns the bounding box for a set of vertices,
+        # with its size increased in each direction by the "add" value
         min_x = float('inf')
         min_y = float('inf')
         min_z = float('inf')
@@ -327,8 +329,8 @@ class BAIWriter:
         file.write_raw_string("CAI1")
         file.write_uint16(len(self.intersections_finished))
         file.write_uint16(len(self.roads_finished))
-        check = 0
-        check2 = 0.0
+        progress = 0
+        progress2 = 0.0
         for i_rd in range(len(self.roads_finished)):
             rd = self.roads_finished[i_rd]
             rd_pr = self.scene_input.get_property_container(rd)
@@ -346,8 +348,8 @@ class BAIWriter:
                 file.write_uint16(ib + 1)
             file.write_float(19.0)
             file.write_float(15.0)
-            self.write_road_data(rd, 1)
-            self.write_road_data(rd, 0)
+            self.write_road_data(rd, True)
+            self.write_road_data(rd, False)
             tot_dist = 0.0
             file.write_float(0.0)
             origs = []
@@ -397,12 +399,12 @@ class BAIWriter:
                 file.write_vec3(v)
             self.write_road_end(rd, 1)
             self.write_road_end(rd, 0)
-            check += 1
-            check2 += 1
-            print(str(check))
-            if check2 % 10 == 0:
-                self.scene_input.set_progress_bar(0.99 + (check2/obj_count) * 0.001)
-        check = 0
+            progress += 1
+            progress2 += 1
+            print(str(progress))
+            if progress2 % 10 == 0:
+                self.scene_input.set_progress_bar(0.99 + (progress2/obj_count) * 0.001)
+        progress = 0
         for iIS in range(len(self.intersections_finished)):
             IS = self.intersections_finished[iIS]
             IS_p = self.prop(IS)
@@ -418,17 +420,17 @@ class BAIWriter:
                     r = self.roads_finished[ir]
                     if crs == self.prop(r)["id"]:
                         file.write_uint32(ir)
-            check += 1
-            check2 += 1
-            print(str(check))
-            if check2 % 10 == 0:
-                self.scene_input.set_progress_bar(0.99 + (check2/obj_count) * 0.001)
+            progress += 1
+            progress2 += 1
+            print(str(progress))
+            if progress2 % 10 == 0:
+                self.scene_input.set_progress_bar(0.99 + (progress2/obj_count) * 0.001)
         file.write_uint32(len(blocks) + 1)
-        cull1 = []
-        cull2 = []
-        rdist = 200.0
-        pdist = 100.0
-        check = 0.0
+        cull_large_list = []
+        cull_small_list = []
+        large_bubble_size = 200.0
+        small_bubble_size = 100.0
+        progress = 0.0
         valid_block_types = ["ROADS", "ROADN", "ROADSN", "ROADD", "ROADDN", "BLOCK", "IS", "NUL"]
         road_bounding_boxes_large = []
         road_bounding_boxes_small = []
@@ -439,11 +441,11 @@ class BAIWriter:
             for i_vr in range(num_verts_r):
                 vr = self.scene_input.get_vertex(r, i_vr)
                 road_vertices.append(vr)
-            road_bounding_boxes_large.append(self.get_bounding_box(road_vertices, rdist / 2))
-            road_bounding_boxes_small.append(self.get_bounding_box(road_vertices, pdist / 2))
+            road_bounding_boxes_large.append(self.get_bounding_box(road_vertices, large_bubble_size / 2))
+            road_bounding_boxes_small.append(self.get_bounding_box(road_vertices, small_bubble_size / 2))
         for i in range(len(blocks)):
-            culla = []
-            cullb = []
+            cull_large = []
+            cull_small = []
             b = blocks_o[i]
             block_vertices = []
             for obj in b:
@@ -453,14 +455,16 @@ class BAIWriter:
                     for i_vb in range(num_verts_obj):
                         vb = self.scene_input.get_vertex(obj, i_vb)
                         block_vertices.append(vb)
-            bounding_box_large = self.get_bounding_box(block_vertices, rdist / 2)
-            bounding_box_small = self.get_bounding_box(block_vertices, pdist / 2)
+            bounding_box_large = self.get_bounding_box(block_vertices, large_bubble_size / 2)
+            bounding_box_small = self.get_bounding_box(block_vertices, small_bubble_size / 2)
             for i2 in range(len(self.roads_finished)):
                 road_box = road_bounding_boxes_large[i2]
                 intersect = self.boxes_intersect(bounding_box_large, road_box)
                 if not intersect:
                     continue
                 if self.accurate_culling:
+                    # Accurate culling (slower)
+                    # Checks the actual distance for each of the two bubbles
                     r = self.roads_finished[i2]
                     found = False
                     found2 = False
@@ -480,28 +484,31 @@ class BAIWriter:
                                         break
                                     vr = self.scene_input.get_vertex(r, i_vr)
                                     dist = self.verts_distance(vb, vr)
-                                    if dist < pdist:
+                                    if dist < small_bubble_size:
                                         found = True
-                                        cullb.append(i2)
+                                        cull_small.append(i2)
                                         if not found2:
                                             found2 = True
-                                            culla.append(i2)
-                                    elif dist < rdist and not found2:
+                                            cull_large.append(i2)
+                                    elif dist < large_bubble_size and not found2:
                                         found2 = True
-                                        culla.append(i2)
+                                        cull_large.append(i2)
                 else:
-                    culla.append(i2)
+                    # Approximate culling (faster)
+                    # Only does a bounding box check for the small bubble
+                    # (the large one has been checked already)
+                    cull_large.append(i2)
                     road_box2 = road_bounding_boxes_small[i2]
                     intersect2 = self.boxes_intersect(bounding_box_small, road_box2)
                     if intersect2:
-                        cullb.append(i2)
-            cull1.append(culla)
-            cull2.append(cullb)
-            check += 1.0
-            print(str(check))
-            if check % 10 == 0:
-                self.scene_input.set_progress_bar(0.991 + (check/len(blocks))*0.009)
-        for cullN in [cull1, cull2]:
+                        cull_small.append(i2)
+            cull_large_list.append(cull_large)
+            cull_small_list.append(cull_small)
+            progress += 1.0
+            print(str(progress))
+            if progress % 10 == 0:
+                self.scene_input.set_progress_bar(0.991 + (progress/len(blocks))*0.009)
+        for cullN in [cull_large_list, cull_small_list]:
             for i in range(-1, len(blocks)):
                 if i == -1:
                     file.write_uint16(0)
