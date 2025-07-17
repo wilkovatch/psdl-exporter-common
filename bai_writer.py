@@ -28,10 +28,10 @@ class BAIWriter:
         C = np.multiply(np.dot(A, NB), NB)
         return np.add(C, oA)
 
-    def rotate_point(self, point_to_rotate, center_point, angle):
+    def rotate_point(self, point_to_rotate, center_point, angleRad):
         pR = point_to_rotate
         pC = center_point
-        theta = np.deg2rad(angle)
+        theta = angleRad
         cos_theta = math.cos(theta)
         sin_theta = math.sin(theta)
         X = (cos_theta * (pR[0] - pC[0])) - (sin_theta * (pR[1] - pC[1])) + pC[0]
@@ -52,6 +52,65 @@ class BAIWriter:
         for i in range(verts_num):
             vertices_sum = np.add(vertices_sum, self.scene_input.get_vertex(IS, i))
         return np.divide(vertices_sum, verts_num)
+
+    def get_automatically_placed_traffic_light(self, index_in_intersection, intersection_roads, block_id, road_properties, road, end_index):
+        # Automatic traffic lights placement
+        # They are placed on the opposite road (as in MM2)
+        # (it actually uses the road with index+2, so only
+        # for intersections with 4 roads it's the opposite.
+        # It also excludes roads without traffic from the count.)
+
+        # Find the opposite road
+        this_road_ok = False
+        opposite_road_index = index_in_intersection + 2
+        if opposite_road_index >= len(intersection_roads):
+            # Avoid overflow
+            opposite_road_index -= len(intersection_roads)
+        while not this_road_ok:
+            # Check the current road
+            i = intersection_roads[opposite_road_index]
+            road_2 = None
+            for temp_road in self.roads_finished:
+                if i == self.prop(temp_road)["id"]:
+                    road_2 = temp_road
+            road_2_properties = self.prop(road_2)
+            n_lanes_A = road_2_properties["left_lanes"]
+            n_lanes_B = road_2_properties["right_lanes"]
+            sides_have_sidewalks = self.get_which_sides_have_sidewawlks(road_2_properties["has_sidewalks"])
+            traf_type = int(road_2_properties["traffic_type"])
+            if traf_type == 3 and (n_lanes_A == "0" or n_lanes_B == "0"):
+                # Skip roads without traffic
+                opposite_road_index += 1
+                if opposite_road_index >= len(intersection_roads):
+                    opposite_road_index -= len(intersection_roads)
+            else:
+                # Opposite road found
+                this_road_ok = True
+
+        # Place the traffic light
+        light_dir = 1 if road_2_properties["end_intersection"] == block_id else 0
+        road_2_vps = int(road_2_properties["vertices_per_section"])
+        vo1 = [0.0, 0.0, 0.0]
+        vo2 = [0.0, 0.0, 0.0]
+        if light_dir == 1:
+            vo1 = self.scene_input.get_vertex(road_2, -road_2_vps + sides_have_sidewalks[1])
+            vo2 = self.scene_input.get_vertex(road_2, -road_2_vps)
+        else:
+            vo1 = self.scene_input.get_vertex(road_2, road_2_vps - sides_have_sidewalks[0] - 1)
+            vo2 = self.scene_input.get_vertex(road_2, road_2_vps - 1)
+        vo = np.divide(np.add(np.multiply(vo1, 3), vo2), 4)
+        road_1_vps = int(road_properties["vertices_per_section"])
+        oA = [0.0, 0.0, 0.0]
+        oB = [0.0, 0.0, 0.0]
+        if end_index == 0:
+            oA = self.scene_input.get_vertex(road, road_1_vps - 1)
+            oB = self.scene_input.get_vertex(road, 0)
+        elif end_index == 1:
+            oA = self.scene_input.get_vertex(road, -road_1_vps)
+            oB = self.scene_input.get_vertex(road, -1)
+        vd0 = self.vector_projection(oA, oB, vo)
+        vd = self.rotate_point(vd0, vo, np.deg2rad(90.0))
+        return (vo, vd)
 
     def write_road_end(self, road, end_index):
         road_properties = self.prop(road)
@@ -90,63 +149,17 @@ class BAIWriter:
         file.write_uint32(index_in_intersection)
 
         if road_rules[end_index] == "1":
-            # Automatic traffic lights placement
-            # They are placed on the opposite road (as in MM2)
-            # (it actually uses the road with index+2, so only
-            # for intersections with 4 roads it's the opposite.
-            # It also excludes roads without traffic from the count.)
-
-            # Find the opposite road
-            this_road_ok = False
-            opposite_road_index = index_in_intersection + 2
-            if opposite_road_index >= len(intersection_roads):
-                # Avoid overflow
-                opposite_road_index -= len(intersection_roads)
-            while not this_road_ok:
-                # Check the current road
-                i = intersection_roads[opposite_road_index]
-                road_2 = None
-                for temp_road in self.roads_finished:
-                    if i == self.prop(temp_road)["id"]:
-                        road_2 = temp_road
-                road_2_properties = self.prop(road_2)
-                n_lanes_A = road_2_properties["left_lanes"]
-                n_lanes_B = road_2_properties["right_lanes"]
-                sides_have_sidewalks = self.get_which_sides_have_sidewawlks(road_2_properties["has_sidewalks"])
-                traf_type = int(road_2_properties["traffic_type"])
-                if traf_type == 3 and (n_lanes_A == "0" or n_lanes_B == "0"):
-                    # Skip roads without traffic
-                    opposite_road_index += 1
-                    if opposite_road_index >= len(intersection_roads):
-                        opposite_road_index -= len(intersection_roads)
-                else:
-                    # Opposite road found
-                    this_road_ok = True
-
-            # Place the traffic light
-            light_dir = 1 if road_2_properties["end_intersection"] == block_id else 0
-            road_2_vps = int(road_2_properties["vertices_per_section"])
-            vo1 = [0.0, 0.0, 0.0]
-            vo2 = [0.0, 0.0, 0.0]
-            if light_dir == 1:
-                vo1 = self.scene_input.get_vertex(road_2, -road_2_vps + sides_have_sidewalks[1])
-                vo2 = self.scene_input.get_vertex(road_2, -road_2_vps)
+            tl_key = this_road_id + "." + str(end_index)
+            if tl_key in self.traffic_lights:
+                # Manually placed traffic light
+                traffic_light = self.traffic_lights[tl_key]
+                vo = self.scene_input.get_position(traffic_light)
+                rot = self.scene_input.get_rotation(traffic_light)
+                vd0 = [vo[0] - 1.0, vo[1], vo[2]]
+                vd = self.rotate_point(vd0, vo, rot[2])
             else:
-                vo1 = self.scene_input.get_vertex(road_2, road_2_vps - sides_have_sidewalks[0] - 1)
-                vo2 = self.scene_input.get_vertex(road_2, road_2_vps - 1)
-            vo = np.divide(np.add(np.multiply(vo1, 3), vo2), 4)
+                (vo, vd) = self.get_automatically_placed_traffic_light(index_in_intersection, intersection_roads, block_id, road_properties, road, end_index)
             file.write_vec3(vo)
-            road_1_vps = int(road_properties["vertices_per_section"])
-            oA = [0.0, 0.0, 0.0]
-            oB = [0.0, 0.0, 0.0]
-            if end_index == 0:
-                oA = self.scene_input.get_vertex(road, road_1_vps - 1)
-                oB = self.scene_input.get_vertex(road, 0)
-            elif end_index == 1:
-                oA = self.scene_input.get_vertex(road, -road_1_vps)
-                oB = self.scene_input.get_vertex(road, -1)
-            vd0 = self.vector_projection(oA, oB, vo)
-            vd = self.rotate_point(vd0, vo, 90.0)
             file.write_vec3(vd)
         else:
             # Empty data for (unused) traffic lights
@@ -305,16 +318,21 @@ class BAIWriter:
         file = self.file
         self.roads_finished = []
         self.intersections_finished = []
+        self.traffic_lights = {}
         print("Getting the BAI objects...")
         obj_count = 0
         for o in self.scene_input.get_object_list():
             o_pr = self.scene_input.get_property_container(o)
-            if self.utils.get_object_type(o) == "BAI":
+            obj_type = self.utils.get_object_type(o)
+            if obj_type == "BAI":
                 if bool(int(o_pr["is_road"])):
                     self.roads_finished.append(o)
                 else:
                     self.intersections_finished.append(o)
                 obj_count += 1.0
+            elif obj_type == "TRAFL":
+                tl_key = o_pr["road_id"] + "." + ("0" if o_pr["is_start_intersection_light"] == "1" else "1")
+                self.traffic_lights[tl_key] = o
         blocks = self.utils.get_real_blocks()
         blocks_o = []
         for b in blocks:

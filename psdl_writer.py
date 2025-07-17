@@ -53,7 +53,7 @@ class PSDLWriter:
         max_v = 0
         if bname in ["FACB", "FAC", "SLIVER"]:
             max_v = 2
-        elif bname in ["RAIL", "RAILC", "INST", "BAI", "PTH", "PKG"]:
+        elif bname in ["RAIL", "RAILC", "INST", "BAI", "PTH", "PKG", "TRAFL"]:
             max_v = 0
         else:
             max_v = self.scene_input.get_vertices_num(obj)
@@ -100,7 +100,7 @@ class PSDLWriter:
             bname = self.utils.get_object_type(obj)
             vert_num = self.scene_input.get_vertices_num(obj)
             poly_num = self.scene_input.get_polygons_num(obj)
-            has_geometry = bname not in ["INST", "BAI", "PTH", "PKG"] and (bname == "RAIL" or (vert_num > 0 and poly_num > 0))
+            has_geometry = bname not in ["INST", "BAI", "PTH", "PKG", "TRAFL"] and (bname == "RAIL" or (vert_num > 0 and poly_num > 0))
             if has_geometry:
                 n = self.utils.get_block_number(obj)
                 blocks_temp[n-1].append(Attribute(geo=obj, mat_id=0))
