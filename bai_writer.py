@@ -76,7 +76,7 @@ class BAIWriter:
             road_2_properties = self.prop(road_2)
             n_lanes_A = road_2_properties["left_lanes"]
             n_lanes_B = road_2_properties["right_lanes"]
-            has_geo_sidewalks = road_2_properties["has_geo_sidewalks"]
+            has_geo_sidewalks = int(road_2_properties["has_geo_sidewalks"])
             traf_type = int(road_2_properties["traffic_type"])
             if traf_type == 3 and (n_lanes_A == "0" or n_lanes_B == "0"):
                 # Skip roads without traffic
