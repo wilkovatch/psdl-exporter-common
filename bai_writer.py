@@ -76,7 +76,7 @@ class BAIWriter:
             road_2_properties = self.prop(road_2)
             n_lanes_A = road_2_properties["left_lanes"]
             n_lanes_B = road_2_properties["right_lanes"]
-            sides_have_sidewalks = self.get_which_sides_have_sidewawlks(road_2_properties["has_sidewalks"])
+            has_geo_sidewalks = road_2_properties["has_geo_sidewalks"]
             traf_type = int(road_2_properties["traffic_type"])
             if traf_type == 3 and (n_lanes_A == "0" or n_lanes_B == "0"):
                 # Skip roads without traffic
@@ -93,10 +93,10 @@ class BAIWriter:
         vo1 = [0.0, 0.0, 0.0]
         vo2 = [0.0, 0.0, 0.0]
         if light_dir == 1:
-            vo1 = self.scene_input.get_vertex(road_2, -road_2_vps + sides_have_sidewalks[1])
+            vo1 = self.scene_input.get_vertex(road_2, -road_2_vps + has_geo_sidewalks)
             vo2 = self.scene_input.get_vertex(road_2, -road_2_vps)
         else:
-            vo1 = self.scene_input.get_vertex(road_2, road_2_vps - sides_have_sidewalks[0] - 1)
+            vo1 = self.scene_input.get_vertex(road_2, road_2_vps - has_geo_sidewalks - 1)
             vo2 = self.scene_input.get_vertex(road_2, road_2_vps - 1)
         vo = np.divide(np.add(np.multiply(vo1, 3), vo2), 4)
         road_1_vps = int(road_properties["vertices_per_section"])
@@ -171,14 +171,17 @@ class BAIWriter:
         file = self.file
         vps = int(rd_pr["vertices_per_section"])
         this_side_has_sidewalks = self.get_which_sides_have_sidewawlks(rd_pr["has_sidewalks"])[1 if is_right_side else 0] > 0
+        has_geo_sidewalks = int(rd_pr["has_geo_sidewalks"]) > 0
         traffic_type = int(rd_pr["traffic_type"])
         n_sections = self.scene_input.get_vertices_num(rd) // vps
         n_lanes = int(rd_pr["left_lanes"] if is_right_side else rd_pr["right_lanes"])
         if n_lanes == 0:
-            if traffic_type == 0 or traffic_type == 1:
+            if traffic_type == 0 or (traffic_type == 1 and this_side_has_sidewalks):
                 traffic_type = 1
             else:
                 traffic_type = 3
+        elif traffic_type == 0 and ((not this_side_has_sidewalks) or (not has_geo_sidewalks)):
+            traffic_type = 2
         n_lanes_other_side = int(rd_pr["right_lanes"] if is_right_side else rd_pr["left_lanes"])
         file.write_uint16(n_lanes)
         file.write_uint16(0)
@@ -194,7 +197,7 @@ class BAIWriter:
             for i2 in n_sections_range:
                 v1 = [0.0, 0.0, 0.0]
                 v2 = [0.0, 0.0, 0.0]
-                if this_side_has_sidewalks:
+                if has_geo_sidewalks:
                     if vps == 6:
                         x = -2 if is_right_side else 0
                         v1 = self.scene_input.get_vertex(rd, i2 * vps + 3 + x)
