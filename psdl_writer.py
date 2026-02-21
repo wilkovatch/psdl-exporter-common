@@ -816,12 +816,34 @@ class PSDLWriter:
             v = self.scene_input.get_vertex(bp.geo, i)
             sl.append(self.get_vert_index(v))
 
+    def process_part_sw_cap(self, b, bi, bp, bpi, last, uniq_vert_idxs):
+        sl = self.temp_shorts_list
+        # quick and dirty way: write both caps to avoid having to detect the case
+        sl.append(self.convert_to_attr(last, 1, 4//2))
+        sl.append(0)
+        sl.append(0)
+        sl.append(uniq_vert_idxs[1])
+        sl.append(uniq_vert_idxs[0])
+        sl.append(self.convert_to_attr(last, 1, 4//2))
+        sl.append(1)
+        sl.append(1)
+        sl.append(uniq_vert_idxs[1])
+        sl.append(uniq_vert_idxs[0])
+
     def process_part_sw(self, b, bi, bp, bpi, last):
         # Sidewalk
         sl = self.temp_shorts_list
         vert_count = self.scene_input.get_vertices_num(bp.geo)
+
         if (vert_count % 2) != 0:
             raise Exception("Error in block " + str(bi) + ": SW vertex count is not multiple of 2")
+
+        # Check if it's a cap
+        vert_idxs = [self.get_vert_index(self.scene_input.get_vertex(bp.geo, i)) for i in range(vert_count)]
+        uniq_vert_idxs = list(dict.fromkeys(vert_idxs))
+        if len(uniq_vert_idxs) == 2:
+            return self.process_part_sw_cap(b, bi, bp, bpi, last, uniq_vert_idxs)
+
         if vert_count > 14:
             sl.append(self.convert_to_attr(last, 1, 0))
             sl.append(vert_count//2)
