@@ -368,6 +368,39 @@ class BAIWriter:
             ]
         return route
 
+    def warn_cable_car_lines_without_ends(self):
+        # aiMap::Init puts a cable car (va_cablecar_f) only on the intersections where exactly one of the roads has
+        # rails (the 4 ends of the San Francisco lines), so a line that is only a closed loop gets none
+        cable_roads = {}
+        for rd in self.roads_finished:
+            rd_pr = self.prop(rd)
+            if rd_pr.get("cable_car", "0") == "1":
+                cable_roads[rd_pr["id"]] = rd_pr
+        if len(cable_roads) == 0:
+            return
+        line_of = {rd_id: rd_id for rd_id in cable_roads}
+
+        def find(rd_id):
+            while line_of[rd_id] != rd_id:
+                rd_id = line_of[rd_id]
+            return rd_id
+
+        line_ends = set()
+        for IS in self.intersections_finished:
+            is_cable_roads = [r for r in self.prop(IS)["roads"].split(";") if r in cable_roads]
+            for r in is_cable_roads[1:]:
+                line_of[find(r)] = find(is_cable_roads[0])
+            if len(is_cable_roads) == 1:
+                line_ends.add(is_cable_roads[0])
+        lines = {}
+        for rd_id in cable_roads:
+            lines.setdefault(find(rd_id), []).append(rd_id)
+        for line in lines.values():
+            if not any(rd_id in line_ends for rd_id in line):
+                names = ', '.join(cable_roads[rd_id].get("original_name", rd_id) for rd_id in line)
+                print("Warning: the cable car line of " + names + " has no ends, MM2 puts a cable car only at each end"
+                      + " of a line (an intersection where only one cable car road arrives), so it will have no cable cars")
+
     def get_flags(self, rd, zs):
         rd_pr = self.prop(rd)
         flags = 0
@@ -609,6 +642,7 @@ class BAIWriter:
             elif obj_type == "TRAFL":
                 tl_key = o_pr["road_id"] + "." + ("0" if o_pr["is_start_intersection_light"] == "1" else "1")
                 self.traffic_lights[tl_key] = o
+        self.warn_cable_car_lines_without_ends()
         self.geometries = {}
         for rd in self.roads_finished:
             self.geometries[self.prop(rd)["id"]] = self.get_route_geometry(rd)
