@@ -18,6 +18,9 @@ class BinaryFileHelper:
     def read_float(self):
         return struct.unpack('<f', self.file.read(4))[0]
 
+    def read_vec2(self):
+        return struct.unpack('<f f', self.file.read(4*2))
+
     def read_vec3(self):
         return struct.unpack('<f f f', self.file.read(4*3))
 
