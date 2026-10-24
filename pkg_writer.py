@@ -102,14 +102,16 @@ class PKGGroups:
 
 
 class PKGWriter:
-    def __init__(self, scene_input: SceneInput, filepath, physics_map=None):
+    def __init__(self, scene_input: SceneInput, filepath, physics_map=None, geometry_path=None, bound_path=None):
+        # geometry_path and bound_path: the folders of the PKG and bound files,
+        # <city>_geometry and <city>_bound next to the PSDL file if not given
         self.scene_input = scene_input
         self.filepath = filepath
         self.physics_map = physics_map if physics_map is not None else {}
         out_dir = os.path.dirname(filepath)
         basename = get_city_basename(filepath)
-        self.geometry_path = os.path.join(out_dir, basename + "_geometry")
-        self.bound_path = os.path.join(out_dir, basename + "_bound")
+        self.geometry_path = geometry_path or os.path.join(out_dir, basename + "_geometry")
+        self.bound_path = bound_path or os.path.join(out_dir, basename + "_bound")
 
     # PKG
 
@@ -367,7 +369,7 @@ class PKGWriter:
             return
         for path in [self.geometry_path, self.bound_path]:
             if not os.path.exists(path):
-                os.mkdir(path)
+                os.makedirs(path)
         for group in groups:
             self.write_pkg(group)
             self.write_bound(group)

@@ -18,7 +18,9 @@ class MainWriter:
                  split_non_coplanar_roads,
                  accurate_bai_culling,
                  cap_materials,
-                 physics_map=None):
+                 physics_map=None,
+                 geometry_path=None,
+                 bound_path=None):
         self.filepath = filepath
         self.scene_input = scene_input
         self.write_psdl = write_psdl
@@ -30,6 +32,9 @@ class MainWriter:
         self.accurate_bai_culling = accurate_bai_culling
         self.cap_materials = cap_materials
         self.physics_map = physics_map
+        # the folders of the PKG and bound files (see PKGWriter)
+        self.geometry_path = geometry_path
+        self.bound_path = bound_path
 
     def write(self):
         if self.write_psdl:
@@ -48,5 +53,5 @@ class MainWriter:
             writer = DecalWriter(self.scene_input, self.filepath, rails)
             writer.write()
         if self.write_pkgs:
-            writer = PKGWriter(self.scene_input, self.filepath, self.physics_map)
+            writer = PKGWriter(self.scene_input, self.filepath, self.physics_map, self.geometry_path, self.bound_path)
             writer.write()
