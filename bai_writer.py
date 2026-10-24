@@ -41,6 +41,11 @@ CDCD_FLOAT = struct.unpack('<f', b'\xcd\xcd\xcd\xcd')[0]
 CDCDCDCD = 0xcdcdcdcd
 BASE_SPEED = 15.0
 
+# the decals of the cable car rails go on through an intersection from a road into another one when their directions
+# towards it are more than 60 degrees apart, along a curve with points about every 2 m
+RAIL_JOIN_MAX_DOT = 0.5
+RAIL_JOIN_STEP = 2.0
+
 FLAG_DIVIDED = 1
 FLAG_ALLEY = 2
 FLAG_FREEWAY = 4
@@ -624,10 +629,8 @@ class BAIWriter:
         ai = [(b2[0][a] > b1[1][a] or b2[1][a] < b1[0][a]) for a in range(3)]
         return not (ai[0] or ai[1] or ai[2])
 
-    def write(self):
-        self.scene_input.init_progress_bar()
-        self.file = BinaryFileHelper(self.filepath.replace(".psdl", ".bai"), 'wb')
-        file = self.file
+    def collect_objects(self):
+        # the BAI roads and intersections, and the traffic lights; returns the number of roads and intersections
         self.roads_finished = []
         self.intersections_finished = []
         self.traffic_lights = {}
@@ -645,6 +648,71 @@ class BAIWriter:
             elif obj_type == "TRAFL":
                 tl_key = o_pr["road_id"] + "." + ("0" if o_pr["is_start_intersection_light"] == "1" else "1")
                 self.traffic_lights[tl_key] = o
+        return obj_count
+
+    def get_cable_car_rails(self):
+        # the rails of the cable car roads with rail decals (as in the BAI), and the curves joining them through the
+        # intersections where a line goes from a road into another one: [(polyline, road properties)]
+        self.collect_objects()
+        routes = {}
+        res = []
+        for rd in self.roads_finished:
+            rd_pr = self.prop(rd)
+            if rd_pr.get("cable_car", "0") != "1" or "cable_car_rail_decal" not in rd_pr:
+                continue
+            route = self.get_route(rd)
+            routes[rd_pr["id"]] = (route, rd_pr)
+            for rail in route['rails']:
+                res.append((rail, rd_pr))
+        for IS in self.intersections_finished:
+            centre = self.get_intersection_center(IS)
+            ends = []
+            for rd_id in self.prop(IS)["roads"].split(";"):
+                if rd_id not in routes:
+                    continue
+                route, rd_pr = routes[rd_id]
+                c = route['centre']
+                # the end of the road at the intersection, and its direction towards it
+                at_end = np.linalg.norm(np.subtract(c[-1], centre)) < np.linalg.norm(np.subtract(c[0], centre))
+                idx, prev = (-1, -2) if at_end else (0, 1)
+                heading = normalized(np.subtract(c[idx], c[prev]))
+                ends.append((heading, [rail[idx] for rail in route['rails']], rd_pr))
+            res.extend(self.join_rails(ends))
+        return res
+
+    def join_rails(self, ends):
+        # pairs the cable car roads of an intersection going into each other (the most opposite directions first), and
+        # joins the rails of each pair (each one with the closest one of the other road) with a curve
+        res = []
+        pairs = sorted((float(np.dot(ends[i][0], ends[j][0])), i, j) for i in range(len(ends)) for j in range(i + 1, len(ends)))
+        used = set()
+        for dot, i, j in pairs:
+            if dot > RAIL_JOIN_MAX_DOT or i in used or j in used:
+                continue
+            used.update((i, j))
+            (h_a, rails_a, rd_pr), (h_b, rails_b, _) = ends[i], ends[j]
+            if len(rails_a) != 2 or len(rails_b) != 2:
+                continue
+            straight = self.verts_distance(rails_a[0], rails_b[0]) + self.verts_distance(rails_a[1], rails_b[1])
+            crossed = self.verts_distance(rails_a[0], rails_b[1]) + self.verts_distance(rails_a[1], rails_b[0])
+            if crossed < straight:
+                rails_b = rails_b[::-1]
+            for a, b in zip(rails_a, rails_b):
+                length = self.verts_distance(a, b)
+                n = max(2, int(math.ceil(length / RAIL_JOIN_STEP)))
+                curve = []
+                for k in range(n + 1):
+                    t = k / n
+                    h00, h10, h01, h11 = 2*t**3 - 3*t**2 + 1, t**3 - 2*t**2 + t, -2*t**3 + 3*t**2, t**3 - t**2
+                    curve.append(np.array(a) * h00 + h_a * length * h10 + np.array(b) * h01 - h_b * length * h11)
+                res.append((curve, rd_pr))
+        return res
+
+    def write(self):
+        self.scene_input.init_progress_bar()
+        self.file = BinaryFileHelper(self.filepath.replace(".psdl", ".bai"), 'wb')
+        file = self.file
+        obj_count = self.collect_objects()
         self.warn_cable_car_lines_without_ends()
         self.geometries = {}
         for rd in self.roads_finished:

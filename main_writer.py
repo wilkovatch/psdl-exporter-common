@@ -3,6 +3,7 @@ from .psdl_writer import PSDLWriter
 from .inst_writer import INSTWriter
 from .bai_writer import BAIWriter
 from .pathset_writer import PATHSETWriter
+from .decal_writer import DecalWriter
 from .pkg_writer import PKGWriter
 
 class MainWriter:
@@ -42,6 +43,9 @@ class MainWriter:
             writer.write()
         if self.write_pathset:
             writer = PATHSETWriter(self.scene_input, self.filepath)
+            writer.write()
+            rails = BAIWriter(self.scene_input, self.filepath, self.accurate_bai_culling).get_cable_car_rails()
+            writer = DecalWriter(self.scene_input, self.filepath, rails)
             writer.write()
         if self.write_pkgs:
             writer = PKGWriter(self.scene_input, self.filepath, self.physics_map)
