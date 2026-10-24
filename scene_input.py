@@ -69,3 +69,9 @@ class SceneInput(ABC):
     @abstractmethod
     def remove_doubles(self, new_block, epsilon):
         pass
+
+    # Mesh data of a PKG object (not abstract, only needed by the PKG writer):
+    # {"vertices": [...], "normals": [...], "uvs": [...], "submeshes": [(indices, texture), ...]}
+    # with the vertices already transformed
+    def get_mesh_data(self, obj):
+        raise NotImplementedError("get_mesh_data is not implemented by this scene input")

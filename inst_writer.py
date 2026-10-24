@@ -3,6 +3,7 @@ import math
 from .scene_input import SceneInput
 from .file_io import BinaryFileHelper
 from .utils import Utils
+from .pkg_writer import PKGGroups
 
 
 class INSTWriter:
@@ -23,8 +24,9 @@ class INSTWriter:
         flags = int(pr.get("flags", 0))
         self.export_elem(rot, scalex, scaley, scalez, origo, iblock, obj_name, flags)
 
-    def process_pkg_elem(self, obj):
-        pass
+    def process_pkg_group(self, group):
+        # the pkg is in coordinates relative to its pivot, 256 = visible from every angle
+        self.export_elem([0, 0, 0], 1, 1, 1, group.pivot, group.block, group.stem, 256)
 
     def export_elem(self, rot, scalex, scaley, scalez, origo, iblock, obj_name, flags):
         file = self.file
@@ -78,7 +80,7 @@ class INSTWriter:
             typ = self.utils.get_object_type(obj)
             if typ == "INST":
                 self.process_inst_elem(obj)
-            elif typ == "PKG":
-                self.process_pkg_elem(obj)
+        for group in PKGGroups(self.scene_input, self.filepath).groups:
+            self.process_pkg_group(group)
         self.file.close()
         print("INST exported!")

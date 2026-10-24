@@ -16,7 +16,8 @@ class MainWriter:
                  write_pkgs,
                  split_non_coplanar_roads,
                  accurate_bai_culling,
-                 cap_materials):
+                 cap_materials,
+                 physics_map=None):
         self.filepath = filepath
         self.scene_input = scene_input
         self.write_psdl = write_psdl
@@ -27,6 +28,7 @@ class MainWriter:
         self.split_non_coplanar_roads = split_non_coplanar_roads
         self.accurate_bai_culling = accurate_bai_culling
         self.cap_materials = cap_materials
+        self.physics_map = physics_map
 
     def write(self):
         if self.write_psdl:
@@ -42,5 +44,5 @@ class MainWriter:
             writer = PATHSETWriter(self.scene_input, self.filepath)
             writer.write()
         if self.write_pkgs:
-            writer = PKGWriter(self.scene_input, self.filepath)
+            writer = PKGWriter(self.scene_input, self.filepath, self.physics_map)
             writer.write()
