@@ -78,6 +78,7 @@ class PSDLWriter:
         self.prop_rules = {}
         self.already_rotated = {}
         self.epsilon = 0.03
+        self.spike_width = 0.1  # thinner spikes in the perimeters are removed (see remove_spikes)
         self.height_epsilon = 0.001
         self.tex_warning = 0
         self.tex_warning_2 = 0
@@ -472,6 +473,35 @@ class PSDLWriter:
     def point_line_dist_3d(self, l0, l1, p):
         return np.linalg.norm(np.cross(np.subtract(l0, p), np.subtract(l1, l0)))/np.linalg.norm(np.subtract(l1, l0))
 
+    def is_spike(self, a, x, b):
+        # x is the tip of a spike (the perimeter goes to x and comes back along almost the same line) when b is
+        # within spike_width of the line from x to a, or a of the one from x to b, on the same side of x (2D)
+        u = [a[0] - x[0], a[1] - x[1]]
+        w = [b[0] - x[0], b[1] - x[1]]
+        lu = math.hypot(u[0], u[1])
+        lw = math.hypot(w[0], w[1])
+        if lu < self.epsilon or lw < self.epsilon or u[0] * w[0] + u[1] * w[1] <= 0:
+            return False
+        far, near, l_far = (u, w, lu) if lu >= lw else (w, u, lw)
+        return abs(far[0] * near[1] - far[1] * near[0]) / l_far < self.spike_width
+
+    def remove_spikes(self, perimeter, positions):
+        # Removes the tips of the spikes that lead to no neighbour: the game takes them as edges out of the city, the
+        # cars that cross them are lost ("PHYS.DeclareMover : mover not even in city"). They come from the faces
+        # skipped by the area threshold of get_verts_on_isolated_edges_2 (e.g. a sidewalk corner collapsed on a line
+        # with its curb point at a right angle: the perimeter goes to the curb point and back) and from intersection
+        # corners pinched between two road ends
+        changed = True
+        while changed and len(perimeter) > 3:
+            changed = False
+            for i in range(len(perimeter)):
+                i1 = (i + 1) % len(perimeter)
+                if len(perimeter[i].blocks) == 0 and self.is_spike(positions[i - 1], positions[i], positions[i1]):
+                    del perimeter[i]
+                    del positions[i]
+                    changed = True
+                    break
+
     def get_perimeter(self, the_block, bi, precise):
         perimeter = []
         perimeter_v = []
@@ -601,6 +631,7 @@ class PSDLWriter:
                 perimeter_clean.append(pv)
                 perimeter_v_clean.append(pos)
         perimeter_f = []
+        perimeter_v_f = []
         for i in range(len(perimeter_clean)):
             pv = perimeter_clean[i]
             i0 = i - 1
@@ -618,6 +649,8 @@ class PSDLWriter:
             pv.blocks = p_blocks
             if len(pv.blocks) > 0 or self.point_line_dist_3d(perimeter_v_clean[i0], perimeter_v_clean[i1], perimeter_v_clean[i]) > self.epsilon:
                 perimeter_f.append(pv)
+                perimeter_v_f.append(perimeter_v_clean[i])
+        self.remove_spikes(perimeter_f, perimeter_v_f)
         return perimeter_f
 
     def check_point_plane_dist(self, x1, x2, x3, x4, y1, y2, y3, y4, z1, z2, z3, z4):
