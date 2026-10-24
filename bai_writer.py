@@ -34,6 +34,9 @@ SIDEWALK_MIN_SEGMENT = 0.5
 # the lane boundaries list has 10 floats, enough for 4 lanes
 NUM_LANE_BOUNDARIES = 10
 MAX_LANES_PER_SIDE = 4
+# the ambient cars turning at an intersection keep the roads they can turn onto in two arrays of 10 (0x538A10 in
+# midtown2.exe), so the game crashes on intersections with more than 11 roads
+MAX_INTERSECTION_ROADS = 11
 CDCD_FLOAT = struct.unpack('<f', b'\xcd\xcd\xcd\xcd')[0]
 CDCDCDCD = 0xcdcdcdcd
 BASE_SPEED = 15.0
@@ -697,6 +700,9 @@ class BAIWriter:
             IS = self.intersections_finished[iIS]
             IS_p = self.prop(IS)
             is_roads = IS_p["roads"].split(";")
+            if len(is_roads) > MAX_INTERSECTION_ROADS:
+                print("Warning: a BAI intersection has " + str(len(is_roads)) + " roads, more than "
+                      + str(MAX_INTERSECTION_ROADS) + ": the ambient traffic of the game crashes on it")
             iblock = int(IS_p["block"])
             ib = self.utils.get_real_block_number(blocks, iblock)
             file.write_uint16(iIS)
