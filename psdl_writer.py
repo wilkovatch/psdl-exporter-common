@@ -5,13 +5,14 @@ import sys
 from .scene_input import SceneInput
 from .file_io import BinaryFileHelper
 from .utils import Utils
-from collections import namedtuple
+from collections import namedtuple, Counter
 
 
 class Attribute:
     def __init__(self, geo, mat_id):
         self.geo = geo
         self.mat_id = mat_id
+        self.div_mat_id = 0  # divided roads: the reference of the divider textures (stored in a byte)
 
 
 class BlockFlag:
@@ -34,9 +35,86 @@ class PerimeterVert:
 
 PROP_BLOCK_MAX_MAT_ID = 255  # the texture references of the blocks with props need subtype 0 (see process_materials)
 
-MatRef = namedtuple("MatRef", "textures ID")
 SectVert = namedtuple("SectVert", "pos ID")
 VertWSects = namedtuple("VertWSects", "pos sects bloc")
+
+
+def runs_overlap(a, b):
+    # the length of the longest end of a that is also the start of b (shorter than b)
+    for k in range(min(len(a), len(b) - 1), 0, -1):
+        if tuple(a[len(a) - k:]) == b[:k]:
+            return k
+    return 0
+
+
+def run_contains(a, b):
+    n = len(b)
+    return any(a[i:i + n] == b for i in range(len(a) - n + 1))
+
+
+def merge_runs(runs):
+    # greedy shortest common superstring: drops the runs contained in others, then joins the two runs with the longest
+    # overlap until none overlap (the order of the runs is kept otherwise)
+    res = []
+    for r in sorted(runs, key=len, reverse=True):
+        if not any(run_contains(m, r) for m in res):
+            res.append(r)
+    res.sort(key=runs.index)
+    while True:
+        best = (0, -1, -1)
+        for i in range(len(res)):
+            for j in range(len(res)):
+                if i != j:
+                    k = runs_overlap(res[i], res[j])
+                    if k > best[0]:
+                        best = (k, i, j)
+        k, i, j = best
+        if k == 0:
+            return res
+        res[i] = res[i] + res[j][k:]
+        del res[j]
+
+
+class TexturePacker:
+    # The texture list of the PSDL. A texture reference points to the first texture of a run and the attributes after it
+    # also use the next ones (n + 1, n + 2...), so each run must be whole in the list, but the runs can overlap and a run
+    # can be found inside another one (e.g. the single textures).
+    def __init__(self):
+        self.textures = []
+        self.first = {}  # texture -> its first index in the list
+
+    def find(self, run, limit=None):
+        # the reference of the first copy of the run in the list (index + 1), None if missing or above the limit
+        res = None
+        i = self.first.get(run[0])
+        if i is not None:
+            n = len(run)
+            for j in range(i, len(self.textures) - n + 1):
+                if tuple(self.textures[j:j + n]) == run:
+                    res = j + 1
+                    break
+        if res is not None and limit is not None and res > limit:
+            return None
+        return res
+
+    def append(self, run):
+        k = runs_overlap(self.textures, run)
+        for t in run[k:]:
+            if t not in self.first:
+                self.first[t] = len(self.textures)
+            self.textures.append(t)
+
+    def add(self, runs, uses, limit=None):
+        # adds the missing runs, the most used first (above 511 the references are not rendered properly by stock MM2)
+        missing = [r for r in sorted(dict.fromkeys(runs), key=lambda r: -uses[r]) if self.find(r, limit) is None]
+        merged = merge_runs([r for r in missing if len(r) > 1])
+        in_merged = {t for m in merged for t in m}
+        items = [(m, max(uses[r] for r in missing if run_contains(m, r))) for m in merged]
+        items += [(r, uses[r]) for r in missing if len(r) == 1 and r[0] not in in_merged]
+        items.sort(key=lambda x: -x[1])
+        for run, _ in items:
+            if self.find(run, limit) is None:
+                self.append(run)
 
 
 class PSDLWriter:
@@ -68,7 +146,7 @@ class PSDLWriter:
         self.sects_x = 0
         self.sects_y = 0
         self.sects = []
-        self.materials = []
+        self.textures = []
         self.n_mats = 1
         self.blocks = []
         self.vertices = []
@@ -281,20 +359,6 @@ class PSDLWriter:
             matlst.append(m.split(".")[0].lower())
         return matlst
 
-    def check_if_mat_present(self, mat):
-        res = 0
-        matcount = len(mat)
-        for m in self.materials:
-            if len(m.textures) == matcount:
-                equal = True
-                for i in range(matcount):
-                    if m.textures[i] != mat[i]:
-                        equal = False
-                        break
-                if equal:
-                    res = m.ID
-        return res
-
     def get_prop_rule(self, bp):
         # the prop rule of a road part (None if it has none), only roads with sidewalks have props
         prop = self.scene_input.get_property_container(bp.geo)
@@ -306,36 +370,89 @@ class PSDLWriter:
     def has_prop_rule(self, b):
         return any(self.get_prop_rule(bp) is not None for bp in b)
 
-    def process_materials_sub(self, name_list, blocks=None):
-        if blocks is None:
-            blocks = self.blocks
-        for b in blocks:
-            for pb in b:
-                pname = self.utils.get_object_type(pb.geo)
-                if pname in name_list:
-                    mats0 = self.get_mat_list(pb.geo)
-                    if pname == "ROADN":
-                        mats = [mats0[0], mats0[0], mats0[0]]
-                    else:
-                        mats = mats0
-                    res = self.check_if_mat_present(mats)
-                    if res != 0:
-                        pb.mat_id = res
-                    else:
-                        self.materials.append(MatRef(textures=mats, ID=self.n_mats))
-                        pb.mat_id = self.n_mats
-                        self.n_mats += len(mats)
+    def get_part_runs(self, b):
+        # the texture runs of the parts of a block that have a texture reference: (part, run, divider run), the divider
+        # run is not None for the divided roads
+        ist = []
+        swt = []
+        cwt = []
+        for pb in b:
+            pname = self.utils.get_object_type(pb.geo)
+            if pname in ["IS", "CW", "SW"]:
+                mat = self.get_mat_list(pb.geo)[0]
+            if pname == "IS":
+                if mat not in ist:
+                    ist.append(mat)
+            elif pname == "CW":
+                if mat not in cwt:
+                    cwt.append(mat)
+            elif pname == "SW":
+                if mat not in swt:
+                    swt.append(mat)
+        is_runs = {}
+        for t in ist:
+            mats = [t]
+            if len(swt) == 0 and len(cwt) > 0:
+                mats.append(t)
+                mats.append(cwt[0])
+            elif len(swt) > 0 and len(cwt) == 0:
+                mats.append(swt[0])
+            elif len(swt) > 0 and len(cwt) > 0:
+                mats.append(swt[0])
+                mats.append(cwt[0])
+            is_runs[t] = tuple(mats)
+        res = []
+        for pb in b:
+            pname = self.utils.get_object_type(pb.geo)
+            if pname in ["ROADS", "ROADSN", "FAC", "SLIVER", "BLOCK", "ROOF", "RAIL", "RAILC"]:
+                res.append((pb, tuple(self.get_mat_list(pb.geo)), None))
+            elif pname == "ROADN":
+                res.append((pb, (self.get_mat_list(pb.geo)[0],) * 3, None))
+            elif pname == "IS":
+                res.append((pb, is_runs[self.get_mat_list(pb.geo)[0]], None))
+            elif pname in ["ROADD", "ROADDN"]:
+                # the road (n: road, n + 1: sidewalk, n + 2: LOD) and the divider (its own reference stored in a byte,
+                # 4 textures) are independent runs, as in the stock cities
+                mats = tuple(self.get_mat_list(pb.geo))
+                if len(mats) >= 7:
+                    res.append((pb, mats[:3], mats[3:7]))
+                else:
+                    res.append((pb, mats, ()))
+        return [r for r in res if len(r[1]) > 0]
 
     def process_materials(self):
         print("processing materials...")
-        # first the divided roads, their divider texture index is stored in a byte
-        self.process_materials_sub(["ROADD", "ROADDN", "RAIL", "RAILC"])
-        # then the blocks with props: the game reads the texture references with an index >= 255 wrongly while
-        # placing the props along the roads (lvlSDL::Enumerate does not skip the data of a texture reference with
-        # subtype > 0) and quits with "Invalid command" (or crashes with MM2Hook)
-        self.process_materials_blocks([b for b in self.blocks if self.has_prop_rule(b)])
-        self.process_materials_blocks(self.blocks)
-        print("Materials found: " + str(len(self.materials)))
+        packer = TexturePacker()
+        runs = []  # (part, attribute to set, run, needs a reference < 256)
+        div_after_road = []  # divided roads with less than 7 textures: the divider follows the road
+        for b in self.blocks:
+            prop_block = self.has_prop_rule(b)
+            for pb, run, div_run in self.get_part_runs(b):
+                runs.append((pb, "mat_id", run, prop_block or div_run == ()))
+                if div_run:
+                    runs.append((pb, "div_mat_id", div_run, True))
+                elif div_run == ():
+                    div_after_road.append(pb)
+        uses = Counter(run for _, _, run, _ in runs)
+        # first the runs that need a reference < 256: the dividers (stored in a byte) and the blocks with props (the game
+        # reads the texture references with an index >= 255 wrongly while placing the props along the roads,
+        # lvlSDL::Enumerate does not skip the data of a texture reference with subtype > 0, and quits with "Invalid
+        # command" or crashes with MM2Hook)
+        packer.add([run for _, _, run, low in runs if low], uses, PROP_BLOCK_MAX_MAT_ID)
+        packer.add([run for _, _, run, low in runs if not low], uses)
+        refs = {}
+        for pb, attr, run, low in runs:
+            key = (run, low)
+            if key not in refs:
+                ref = packer.find(run, PROP_BLOCK_MAX_MAT_ID) if low else None
+                refs[key] = ref if ref is not None else packer.find(run)
+            setattr(pb, attr, refs[key])
+        for pb in div_after_road:
+            pb.div_mat_id = pb.mat_id + 3
+        self.textures = packer.textures
+        self.n_mats = len(self.textures) + 1
+        print("Materials found: " + str(len(self.textures)) + " textures (" + str(len(set(refs.values()))) +
+              " texture references, " + str(len(set(self.textures))) + " different textures)")
         self.check_prop_blocks_materials()
 
     def check_prop_blocks_materials(self):
@@ -351,54 +468,6 @@ class PSDLWriter:
                   str(PROP_BLOCK_MAX_MAT_ID) + " (too many textures in the blocks with props and in the divided roads), " +
                   "their props are not exported, otherwise MM2 would quit or crash while loading the city (blocks " +
                   ", ".join(str(bi + 1) for bi in sorted(self.no_prop_blocks)) + ")")
-
-    def process_materials_blocks(self, blocks):
-        # the materials of the blocks, except those of the divided roads
-        self.process_materials_sub(["ROADS", "ROADSN", "FAC", "SLIVER"], blocks)
-        self.process_materials_sub(["ROADN"], blocks)
-        for b in blocks:
-            ist = []
-            swt = []
-            cwt = []
-            for pb in b:
-                pname = self.utils.get_object_type(pb.geo)
-                if pname in ["IS", "CW", "SW"]:
-                    mat = self.get_mat_list(pb.geo)[0]
-                if pname == "IS":
-                    if mat not in ist:
-                        ist.append(mat)
-                elif pname == "CW":
-                    if mat not in cwt:
-                        cwt.append(mat)
-                elif pname == "SW":
-                    if mat not in swt:
-                        swt.append(mat)
-            for i in range(len(ist)):
-                mats = []
-                mats.append(ist[i])
-                if len(swt) == 0 and len(cwt) > 0:
-                    mats.append(ist[i])
-                    mats.append(cwt[0])
-                elif len(swt) > 0 and len(cwt) == 0:
-                    mats.append(swt[0])
-                elif len(swt) > 0 and len(cwt) > 0:
-                    mats.append(swt[0])
-                    mats.append(cwt[0])
-                for pb in b:
-                    pname = self.utils.get_object_type(pb.geo)
-                    if pname != "FACB":
-                        pmat = self.get_mat_list(pb.geo)[0]
-                    else:
-                        pmat = []
-                    if pname == "IS" and pmat == mats[0]:
-                        res = self.check_if_mat_present(mats)
-                        if res != 0:
-                            pb.mat_id = res
-                        else:
-                            self.materials.append(MatRef(textures=mats, ID=self.n_mats))
-                            pb.mat_id = self.n_mats
-                            self.n_mats += len(mats)
-        self.process_materials_sub(["BLOCK", "ROOF"], blocks)
 
     def get_face_array(self, obj, f, is_bmesh):
         return self.scene_input.get_polygon(obj, f)
@@ -1171,9 +1240,9 @@ class PSDLWriter:
         elif caps == 3:
             end_close = 1
             start_close = 1
-        if (bp.mat_id + 3) > 255:
+        if bp.div_mat_id > 255:
             raise Exception("Error in block " + str(bi) + ": ROADD" + n_str + " divider texture index > 255")
-        sl.append(self.convert_div_road_vals(end_close, start_close, div_type, (bp.mat_id + 3)))
+        sl.append(self.convert_div_road_vals(end_close, start_close, div_type, bp.div_mat_id))
         sl.append(div_value)
         if typ == "ROADD":
             for i in range(n_verts):
@@ -1606,9 +1675,8 @@ class PSDLWriter:
 
         # Write materials
         file.write_uint32(self.n_mats)
-        for m in self.materials:
-            for t in m.textures:
-                file.write_string(t)
+        for t in self.textures:
+            file.write_string(t)
 
         # Write blocks
         file.write_uint32(len(self.blocks) + 1)
