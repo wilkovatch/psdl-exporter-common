@@ -6,6 +6,7 @@ import numpy as np
 from .scene_input import SceneInput
 from .file_io import BinaryFileHelper
 from .utils import Utils
+from . import report
 
 # The decals of the city (city/<city>/decals.pathset, PTH1 like props.pathset), as the game reads them at the city load:
 # - each path is one decal, with the texture named by the path (paths with less than 3 points are skipped)
@@ -167,16 +168,16 @@ class DecalWriter:
         paths = []
         for points, width, texture, name in self.get_strips():
             if len(texture) > MAX_NAME_LENGTH:
-                print("Warning: the texture of the decal " + name + " has a name longer than " + str(MAX_NAME_LENGTH)
+                report.warning("the texture of the decal " + name + " has a name longer than " + str(MAX_NAME_LENGTH)
                       + " characters, the decal is not exported")
                 continue
             if width <= 0:
-                print("Warning: the decal " + name + " has no width, it is not exported")
+                report.warning("the decal " + name + " has no width, it is not exported")
                 continue
             for path in strip_paths(points, width):
                 for k in range(len(path) // 2):
                     if game_v(path, k) != k:
-                        print("Warning: the tiles of the decal " + name + " are stretched by the game")
+                        report.warning("the tiles of the decal " + name + " are stretched by the game")
                         break
                 paths.append((texture, path))
         if len(paths) == 0:

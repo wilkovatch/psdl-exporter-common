@@ -10,6 +10,7 @@ import numpy as np
 from .scene_input import SceneInput
 from .file_io import BinaryFileHelper
 from .utils import Utils
+from . import report
 
 # the writer works in a z-up space, BinaryFileHelper.write_vec3 converts it to the y-up space of the file
 UP = np.array([0.0, 0.0, 1.0])
@@ -348,7 +349,8 @@ class BAIWriter:
         geo = self.get_route_geometry(rd)
         for lanes in (geo.right_lanes, geo.left_lanes):
             if len(lanes) > MAX_LANES_PER_SIDE:
-                print("Warning: " + name + " has more than " + str(MAX_LANES_PER_SIDE) + " lanes on a side, the outer ones are not exported to the BAI")
+                report.warning(name + " has more than " + str(MAX_LANES_PER_SIDE) + " lanes on a side, the outer ones are not exported to the BAI",
+                               element=report.element_name(name), kind="road")
                 del lanes[MAX_LANES_PER_SIDE:]
         geo = geo.resampled(resampled_parameters(geo.centre()))
         centre = geo.centre()
@@ -406,7 +408,7 @@ class BAIWriter:
         for line in lines.values():
             if not any(rd_id in line_ends for rd_id in line):
                 names = ', '.join(cable_roads[rd_id].get("original_name", rd_id) for rd_id in line)
-                print("Warning: the cable car line of " + names + " has no ends, MM2 puts a cable car only at each end"
+                report.warning("the cable car line of " + names + " has no ends, MM2 puts a cable car only at each end"
                       + " of a line (an intersection where only one cable car road arrives), so it will have no cable cars")
 
     def get_flags(self, rd, zs):
@@ -769,8 +771,9 @@ class BAIWriter:
             IS_p = self.prop(IS)
             is_roads = IS_p["roads"].split(";")
             if len(is_roads) > MAX_INTERSECTION_ROADS:
-                print("Warning: a BAI intersection has " + str(len(is_roads)) + " roads, more than "
-                      + str(MAX_INTERSECTION_ROADS) + ": the ambient traffic of the game crashes on it")
+                report.warning("a BAI intersection has " + str(len(is_roads)) + " roads, more than "
+                      + str(MAX_INTERSECTION_ROADS) + ": the ambient traffic of the game crashes on it",
+                      element=report.element_name(IS_p.get("original_name")), kind="intersection")
             iblock = int(IS_p["block"])
             ib = self.utils.get_real_block_number(blocks, iblock)
             file.write_uint16(iIS)

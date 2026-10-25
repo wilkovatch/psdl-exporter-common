@@ -5,6 +5,7 @@ import sys
 from .scene_input import SceneInput
 from .file_io import BinaryFileHelper
 from .utils import Utils
+from . import report
 from collections import namedtuple, Counter
 
 
@@ -464,7 +465,7 @@ class PSDLWriter:
             if self.has_prop_rule(b) and any(bp.mat_id > PROP_BLOCK_MAX_MAT_ID for bp in b):
                 self.no_prop_blocks.add(bi)
         if len(self.no_prop_blocks) > 0:
-            print("Warning: " + str(len(self.no_prop_blocks)) + " blocks with props use a texture with an index >= " +
+            report.warning(str(len(self.no_prop_blocks)) + " blocks with props use a texture with an index >= " +
                   str(PROP_BLOCK_MAX_MAT_ID) + " (too many textures in the blocks with props and in the divided roads), " +
                   "their props are not exported, otherwise MM2 would quit or crash while loading the city (blocks " +
                   ", ".join(str(bi + 1) for bi in sorted(self.no_prop_blocks)) + ")")
@@ -610,6 +611,13 @@ class PSDLWriter:
                     del positions[i]
                     changed = True
                     break
+
+    # the original_name of the first part of the block, if any
+    def block_name(self, the_block):
+        try:
+            return self.scene_input.get_property_container(the_block[0].geo).get("original_name", None)
+        except Exception:
+            return None
 
     def get_perimeter(self, the_block, bi, precise):
         perimeter = []
@@ -1356,7 +1364,7 @@ class PSDLWriter:
                 self.perim_points = self.rotate_array(self.perim_points, -1)
                 self.already_rotated[bi] = True
             else:
-                print("Warning: a railing on block " + str(bi) + "is on perimeter vertex 0, and the perimeter cannot be rotated automatically, the ingame result will be wrong")
+                report.warning("a railing on block " + str(bi) + "is on perimeter vertex 0, and the perimeter cannot be rotated automatically, the ingame result will be wrong")
 
     def process_part_railc(self, b, bi, bp, bpi, last):
         # Junction tunnel/railing
@@ -1397,7 +1405,7 @@ class PSDLWriter:
                 verts1.append(0)
         remain = len(verts1) % 16
         if rail_empty:
-            print("Warning: railc is empty")
+            report.warning("railc is empty")
         if len(verts1) > 96:
             raise Exception("Error in block " + str(bi) + ": Too many perimeter edges to use RAILC (max is 96, current is " + str(len(verts1)) + ")")
         for i in range(remain):
@@ -1581,14 +1589,26 @@ class PSDLWriter:
                                            ""], self.blocks[bi])
             self.block_flags.append(BlockFlag())
             self.perim_points = []
+            self.shorts_lists = []
+            # when the errors are collected (see report.collecting), a block that fails is written empty (the other
+            # blocks keep their index) and the export goes on, so that every error is reported at once
             try:
-                self.perim_points = self.get_perimeter(b, bi, False)
-            except:
-                print("Perimeter Error, retrying with more precision...")
-                self.perim_points = self.get_perimeter(b, bi, True)
+                try:
+                    self.perim_points = self.get_perimeter(b, bi, False)
+                except Exception:
+                    print("Perimeter Error, retrying with more precision...")
+                    self.perim_points = self.get_perimeter(b, bi, True)
 
-            if self.perim_points is None:
-                raise Exception("Perimeter error on block " + str(bi+1))
+                if self.perim_points is None:
+                    raise Exception("Perimeter error on block " + str(bi+1))
+                self.perim_points.reverse()  # Picked it clockwise, as said in the wiki, but it's counterclockwise actually
+                self.process_block_parts(b, bi)
+            except Exception:
+                if not report.collecting():
+                    raise
+                report.exception("Block " + str(bi + 1) + " not exported", element=report.element_name(self.block_name(b)))
+                self.perim_points = []
+                self.shorts_lists = []
 
             n_perim_points = 0
 
@@ -1597,9 +1617,6 @@ class PSDLWriter:
                     n_perim_points += 1
                 else:
                     n_perim_points += len(p.blocks)
-            self.perim_points.reverse()  # Picked it clockwise, as said in the wiki, but it's counterclockwise actually
-            self.shorts_lists = []
-            self.process_block_parts(b, bi)
             n_shorts = 0
             for a in self.shorts_lists:
                 for s in a:
@@ -1748,16 +1765,16 @@ class PSDLWriter:
         self.process_blocks()
         self.scene_input.end_progress_bar()
         if self.ct_warning:
-            print("Warning: the city contains more than 511 texture references, " \
+            report.warning("the city contains more than 511 texture references, " \
                   "it will work ingame while using MM2Hook but tools like MM2 " \
                   "City Toolkit will not be able to open it. " \
                   "Furthermore, stock MM2 (without MM2Hook) will not be able to load it if there "\
                   "are more than 767 materials (you can check the counter at the beginning of this log)")
         if self.tex_warning > 0:
-            print("Warning: the city contains more than 511 texture references, " \
+            report.warning("the city contains more than 511 texture references, " \
                   "in stock MM2 (without MM2Hook) some will not be rendered properly " \
                   "(affects " + str(self.tex_warning) + " objects)")
         if self.tex_warning_2 > 0:
-            print("Warning: the city contains more than 2047 texture references, " \
+            report.warning("the city contains more than 2047 texture references, " \
             "some will not be rendered properly ingame (affects " + str(self.tex_warning) + " objects)")
         print("PSDL Exported!")

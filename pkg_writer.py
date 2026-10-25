@@ -5,6 +5,7 @@ import struct
 from .scene_input import SceneInput
 from .file_io import BinaryFileHelper
 from .utils import Utils
+from . import report
 
 # Writer for the objects exported to PKG (formats described at
 # https://github.com/Dummiesman/angel-file-formats/tree/master/Midtown%20Madness%202):
@@ -63,10 +64,10 @@ class PKGGroups:
             pkg_name = pr.get("pkg_name", None)
             part = pr.get("lod_name", None)
             if pkg_name is None:
-                print("Warning: object " + name + " has no pkg name, skipped")
+                report.warning("object " + name + " has no pkg name, skipped", element=report.element_name(name))
                 continue
             if part not in ["H", "M", "L", "VL", "BND"]:
-                print("Warning: object " + name + " has an invalid LOD: " + str(part))
+                report.warning("object " + name + " has an invalid LOD: " + str(part), element=report.element_name(name))
                 continue
             if pkg_name not in groups:
                 groups[pkg_name] = PKGGroup(pkg_name, self.basename + "_" + pkg_name)
@@ -79,11 +80,11 @@ class PKGGroups:
         for group in self.groups:
             visible = [group.lods[k] for k in ["VL", "L", "M", "H"] if k in group.lods]
             if len(visible) == 0 or group.block <= 0:
-                print("Warning: pkg " + group.stem + " has no visible mesh or no block, skipped")
+                report.warning("pkg " + group.stem + " has no visible mesh or no block, skipped")
                 continue
             group.mesh = self.scene_input.get_mesh_data(visible[0])
             if sum(len(s[0]) for s in group.mesh["submeshes"]) == 0:
-                print("Warning: pkg " + group.stem + " has no polygons, skipped")
+                report.warning("pkg " + group.stem + " has no polygons, skipped")
                 continue
             if "BND" in group.lods:
                 group.bound_mesh = self.scene_input.get_mesh_data(group.lods["BND"])
@@ -327,7 +328,7 @@ class PKGWriter:
                         groups[d * width_sections + w].append(ti)
         poly_indices = sum(len(g) for g in groups)
         if poly_indices > MAX_U16:
-            print("Warning: too many polygon references in " + path + ", terrain bound skipped")
+            report.warning("too many polygon references in " + path + ", terrain bound skipped")
             return
 
         with open(path, 'wb') as f:
@@ -353,10 +354,10 @@ class PKGWriter:
     def write_bound(self, group):
         verts, tris, materials = self.get_bound(group)
         if len(tris) == 0:
-            print("Warning: pkg " + group.stem + " has an empty bound, skipped")
+            report.warning("pkg " + group.stem + " has an empty bound, skipped")
             return
         if len(verts) > MAX_U16 or len(tris) > MAX_U16:
-            print("Warning: bound of pkg " + group.stem + " is too big (" + str(len(verts)) + " vertices, " + str(len(tris)) + " polygons, max " + str(MAX_U16) + "), skipped")
+            report.warning("bound of pkg " + group.stem + " is too big (" + str(len(verts)) + " vertices, " + str(len(tris)) + " polygons, max " + str(MAX_U16) + "), skipped")
             return
         path = os.path.join(self.bound_path, group.stem + "_BOUND")
         self.write_bnd(path + ".bnd", verts, tris, materials)

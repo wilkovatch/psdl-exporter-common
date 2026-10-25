@@ -4,6 +4,7 @@ from .scene_input import SceneInput
 from .file_io import BinaryFileHelper
 from .utils import Utils
 from .pkg_writer import PKGGroups
+from . import report
 
 # MM2 keeps the geometry of the objects in static tables of about 4096 slots, without checking the limit (midtown2.exe
 # 0x4632c0): past it the game overwrites the variables after them and crashes while loading the objects (at 0x4a48d8).
@@ -95,7 +96,7 @@ class INSTWriter:
             self.process_pkg_group(group)
         self.file.close()
         if len(self.object_names) > MAX_OBJECTS:
-            print("Warning: the INST file has " + str(len(self.object_names)) + " different objects, more than "
+            report.warning("the INST file has " + str(len(self.object_names)) + " different objects, more than "
                   + str(MAX_OBJECTS) + ": the game will likely crash while loading them (merge or reuse meshes, "
                   + "or export fewer elements to PKG)")
         print("INST exported!")
