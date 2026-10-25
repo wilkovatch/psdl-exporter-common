@@ -32,6 +32,8 @@ class PerimeterVert:
         self.blocks = blocks
 
 
+PROP_BLOCK_MAX_MAT_ID = 255  # the texture references of the blocks with props need subtype 0 (see process_materials)
+
 MatRef = namedtuple("MatRef", "textures ID")
 SectVert = namedtuple("SectVert", "pos ID")
 VertWSects = namedtuple("VertWSects", "pos sects bloc")
@@ -76,6 +78,7 @@ class PSDLWriter:
         self.block_flags = []
         self.prop_blocks = []
         self.prop_rules = {}
+        self.no_prop_blocks = set()  # blocks with props that are not exported (see check_prop_blocks_materials)
         self.already_rotated = {}
         self.epsilon = 0.03
         self.spike_width = 0.1  # thinner spikes in the perimeters are removed (see remove_spikes)
@@ -292,8 +295,21 @@ class PSDLWriter:
                     res = m.ID
         return res
 
-    def process_materials_sub(self, name_list):
-        for b in self.blocks:
+    def get_prop_rule(self, bp):
+        # the prop rule of a road part (None if it has none), only roads with sidewalks have props
+        prop = self.scene_input.get_property_container(bp.geo)
+        prop_rule = prop.get("prop_rule", None)
+        if prop_rule is None or self.utils.get_object_type(bp.geo) not in ["ROADS", "ROADD"]:
+            return None
+        return int(prop_rule)
+
+    def has_prop_rule(self, b):
+        return any(self.get_prop_rule(bp) is not None for bp in b)
+
+    def process_materials_sub(self, name_list, blocks=None):
+        if blocks is None:
+            blocks = self.blocks
+        for b in blocks:
             for pb in b:
                 pname = self.utils.get_object_type(pb.geo)
                 if pname in name_list:
@@ -312,10 +328,35 @@ class PSDLWriter:
 
     def process_materials(self):
         print("processing materials...")
+        # first the divided roads, their divider texture index is stored in a byte
         self.process_materials_sub(["ROADD", "ROADDN", "RAIL", "RAILC"])
-        self.process_materials_sub(["ROADS", "ROADSN", "FAC", "SLIVER"])
-        self.process_materials_sub(["ROADN"])
-        for b in self.blocks:
+        # then the blocks with props: the game reads the texture references with an index >= 255 wrongly while
+        # placing the props along the roads (lvlSDL::Enumerate does not skip the data of a texture reference with
+        # subtype > 0) and quits with "Invalid command" (or crashes with MM2Hook)
+        self.process_materials_blocks([b for b in self.blocks if self.has_prop_rule(b)])
+        self.process_materials_blocks(self.blocks)
+        print("Materials found: " + str(len(self.materials)))
+        self.check_prop_blocks_materials()
+
+    def check_prop_blocks_materials(self):
+        # the blocks with props must only have texture references with an index < 255 (see process_materials),
+        # the props of the others are not exported
+        self.no_prop_blocks = set()
+        for bi in range(len(self.blocks)):
+            b = self.blocks[bi]
+            if self.has_prop_rule(b) and any(bp.mat_id > PROP_BLOCK_MAX_MAT_ID for bp in b):
+                self.no_prop_blocks.add(bi)
+        if len(self.no_prop_blocks) > 0:
+            print("Warning: " + str(len(self.no_prop_blocks)) + " blocks with props use a texture with an index >= " +
+                  str(PROP_BLOCK_MAX_MAT_ID) + " (too many textures in the blocks with props and in the divided roads), " +
+                  "their props are not exported, otherwise MM2 would quit or crash while loading the city (blocks " +
+                  ", ".join(str(bi + 1) for bi in sorted(self.no_prop_blocks)) + ")")
+
+    def process_materials_blocks(self, blocks):
+        # the materials of the blocks, except those of the divided roads
+        self.process_materials_sub(["ROADS", "ROADSN", "FAC", "SLIVER"], blocks)
+        self.process_materials_sub(["ROADN"], blocks)
+        for b in blocks:
             ist = []
             swt = []
             cwt = []
@@ -357,8 +398,7 @@ class PSDLWriter:
                             self.materials.append(MatRef(textures=mats, ID=self.n_mats))
                             pb.mat_id = self.n_mats
                             self.n_mats += len(mats)
-        self.process_materials_sub(["BLOCK", "ROOF"])
-        print("Materials found: " + str(len(self.materials)))
+        self.process_materials_sub(["BLOCK", "ROOF"], blocks)
 
     def get_face_array(self, obj, f, is_bmesh):
         return self.scene_input.get_polygon(obj, f)
@@ -889,13 +929,16 @@ class PSDLWriter:
                 v = i + 1
             sl.append(self.get_vert_index(self.scene_input.get_vertex(bp.geo, v)))
 
+    def add_prop_rule(self, bi, bp):
+        prop_rule = self.get_prop_rule(bp)
+        if prop_rule is not None and bi not in self.no_prop_blocks:
+            self.prop_blocks.append(bi)
+            self.prop_rules[bi] = prop_rule
+
     def process_part_roads(self, b, bi, bp, bpi, last):
         # Road with sidewalk
         prop = self.scene_input.get_property_container(bp.geo)
-        prop_rule = prop.get("prop_rule", None)
-        if prop_rule is not None:
-            self.prop_blocks.append(bi)
-            self.prop_rules[bi] = int(prop_rule)
+        self.add_prop_rule(bi, bp)
         sl = self.temp_shorts_list
         self.block_flags[bi].f4 = 1
         self.block_flags[bi].f5 = 0
@@ -1090,11 +1133,8 @@ class PSDLWriter:
     def process_part_roadd_roaddn(self, b, bi, bp, bpi, last):
         # Divided road with and without sidewalk
         prop = self.scene_input.get_property_container(bp.geo)
-        prop_rule = prop.get("prop_rule", None)
         typ = self.utils.get_object_type(bp.geo)
-        if typ == "ROADD" and prop_rule is not None:
-            self.prop_blocks.append(bi)
-            self.prop_rules[bi] = int(prop_rule)
+        self.add_prop_rule(bi, bp)
         sl = self.temp_shorts_list
         n_road_verts = 6 if typ == "ROADD" else 4
         count_max = 42 if typ == "ROADD" else 24
@@ -1103,7 +1143,7 @@ class PSDLWriter:
         self.block_flags[bi].f4 = 1
         self.block_flags[bi].f5 = 0
         if (n_verts % n_road_verts) != 0:
-            raise Exception("Error in block " + bi + ": ROADD" + n_str + " vertex count is not multiple of " + str(n_road_verts))
+            raise Exception("Error in block " + str(bi) + ": ROADD" + n_str + " vertex count is not multiple of " + str(n_road_verts))
         if n_verts > count_max:
             sl.append(self.convert_to_attr(last, 8, 0))
             sl.append(n_verts//n_road_verts)
@@ -1132,7 +1172,7 @@ class PSDLWriter:
             end_close = 1
             start_close = 1
         if (bp.mat_id + 3) > 255:
-            raise Exception("Error in block "+bi+": ROADD" + n_str + " divider texture index > 255")
+            raise Exception("Error in block " + str(bi) + ": ROADD" + n_str + " divider texture index > 255")
         sl.append(self.convert_div_road_vals(end_close, start_close, div_type, (bp.mat_id + 3)))
         sl.append(div_value)
         if typ == "ROADD":
