@@ -5,6 +5,15 @@ from .file_io import BinaryFileHelper
 from .utils import Utils
 from .pkg_writer import PKGGroups
 
+# MM2 keeps the geometry of the objects in static tables of about 4096 slots, without checking the limit (midtown2.exe
+# 0x4632c0): past it the game overwrites the variables after them and crashes while loading the objects (at 0x4a48d8).
+# Each different object name takes 6 slots (the object and its shadow, mask, nonrandom, refl and opaque variants, used
+# even if missing), the instances of the same object share them. Some slots are left to the props and vehicles
+GEOMETRY_SLOTS = 4096
+SLOTS_PER_OBJECT = 6
+RESERVED_GEOMETRY_SLOTS = 512
+MAX_OBJECTS = (GEOMETRY_SLOTS - RESERVED_GEOMETRY_SLOTS) // SLOTS_PER_OBJECT
+
 
 class INSTWriter:
     def __init__(self, scene_input: SceneInput, filepath):
@@ -30,6 +39,7 @@ class INSTWriter:
 
     def export_elem(self, rot, scalex, scaley, scalez, origo, iblock, obj_name, flags):
         file = self.file
+        self.object_names.add(obj_name.lower())
         rx = rot[0]
         rz = rot[1]
         ry = rot[2]
@@ -76,6 +86,7 @@ class INSTWriter:
     def write(self):
         self.file = BinaryFileHelper(self.filepath.replace(".psdl", ".inst"), 'wb')
         self.blocks = self.utils.get_real_blocks()
+        self.object_names = set()
         for obj in self.scene_input.get_object_list():
             typ = self.utils.get_object_type(obj)
             if typ == "INST":
@@ -83,4 +94,8 @@ class INSTWriter:
         for group in PKGGroups(self.scene_input, self.filepath).groups:
             self.process_pkg_group(group)
         self.file.close()
+        if len(self.object_names) > MAX_OBJECTS:
+            print("Warning: the INST file has " + str(len(self.object_names)) + " different objects, more than "
+                  + str(MAX_OBJECTS) + ": the game will likely crash while loading them (merge or reuse meshes, "
+                  + "or export fewer elements to PKG)")
         print("INST exported!")
