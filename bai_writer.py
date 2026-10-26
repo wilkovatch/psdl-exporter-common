@@ -478,6 +478,12 @@ class BAIWriter:
         vd = self.rotate_point(vd0, vo, np.deg2rad(90.0))
         return (vo, vd)
 
+    def bai_intersection_roads(self, intersection):
+        # the ids of the roads of an intersection that are in the BAI (roads without traffic aren't), in order:
+        # the road list written for the intersection and the index of a road in it (its road ends) use this list
+        finished_ids = {self.prop(r)["id"] for r in self.roads_finished}
+        return [crs for crs in self.prop(intersection)["roads"].split(";") if crs in finished_ids]
+
     def write_road_end(self, road, end_index):
         road_properties = self.prop(road)
         file = self.file
@@ -501,7 +507,7 @@ class BAIWriter:
                 if block_id == self.prop(temp_intersection)["block"]:
                     intersection = temp_intersection
                     intersection_index = i
-            intersection_roads = self.prop(intersection)["roads"].split(";")
+            intersection_roads = self.bai_intersection_roads(intersection)
 
             # Find the index of this road in the intersection
             for i in range(len(intersection_roads)):
@@ -779,12 +785,12 @@ class BAIWriter:
             file.write_uint16(iIS)
             file.write_uint16(ib + 1)
             file.write_vec3(self.get_intersection_center(IS))
-            file.write_uint16(len(is_roads))
-            for crs in is_roads:
-                for ir in range(len(self.roads_finished)):
-                    r = self.roads_finished[ir]
-                    if crs == self.prop(r)["id"]:
-                        file.write_uint32(ir)
+            # only the roads that are in the BAI: the count must match the indices written
+            road_indices = [ir for crs in self.bai_intersection_roads(IS) for ir in range(len(self.roads_finished))
+                            if crs == self.prop(self.roads_finished[ir])["id"]]
+            file.write_uint16(len(road_indices))
+            for ir in road_indices:
+                file.write_uint32(ir)
             progress += 1
             progress2 += 1
             print(str(progress))
