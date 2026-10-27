@@ -968,17 +968,17 @@ class PSDLWriter:
 
     def process_part_sw_cap(self, b, bi, bp, bpi, last, uniq_vert_idxs):
         sl = self.temp_shorts_list
-        # quick and dirty way: write both caps to avoid having to detect the case
-        sl.append(self.convert_to_attr(last, 1, 4//2))
-        sl.append(0)
-        sl.append(0)
-        sl.append(uniq_vert_idxs[1])
-        sl.append(uniq_vert_idxs[0])
-        sl.append(self.convert_to_attr(last, 1, 4//2))
-        sl.append(1)
-        sl.append(1)
-        sl.append(uniq_vert_idxs[1])
-        sl.append(uniq_vert_idxs[0])
+        # the "cap" property tells which end piece (start: references 0, end: references 1), otherwise both are
+        # written to avoid having to detect the case
+        prop = self.scene_input.get_property_container(bp.geo)
+        cap = prop.get("cap", "both")
+        ends = [0] if cap == "start" else [1] if cap == "end" else [0, 1]
+        for i, end in enumerate(ends):
+            sl.append(self.convert_to_attr(last if i == len(ends) - 1 else 0, 1, 4//2))
+            sl.append(end)
+            sl.append(end)
+            sl.append(uniq_vert_idxs[1])
+            sl.append(uniq_vert_idxs[0])
 
     def process_part_sw(self, b, bi, bp, bpi, last):
         # Sidewalk
@@ -1574,7 +1574,25 @@ class PSDLWriter:
                     match = typ == "" or pname == typ
                 if (bp not in b2) and match:
                     b2.append(bp)
-        return b2
+        return self.order_rails(b2)
+
+    def order_rails(self, b):
+        # a road tunnel/railing applies to the road attribute after it: a RAIL with the property "road_name" goes right
+        # before the road whose property "original_id" has that value (the others stay where they are)
+        roads = {}
+        for bp in b:
+            key = self.scene_input.get_property_container(bp.geo).get("original_id", None)
+            if key is not None and self.utils.get_object_type(bp.geo) in ["ROADS", "ROADSN", "ROADN", "ROADD", "ROADDN"]:
+                roads[key] = bp
+        rails = [bp for bp in b if self.utils.get_object_type(bp.geo) == "RAIL"
+                 and self.scene_input.get_property_container(bp.geo).get("road_name", None) in roads]
+        if len(rails) == 0:
+            return b
+        res = [bp for bp in b if bp not in rails]
+        for rail in rails:
+            road = roads[self.scene_input.get_property_container(rail.geo)["road_name"]]
+            res.insert(res.index(road), rail)
+        return res
 
     def process_blocks_loop(self):
         for bi in range(len(self.blocks)):
