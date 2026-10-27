@@ -23,7 +23,9 @@ class Utils:
             bname = self.get_object_type(obj)
             vert_num = self.scene_input.get_vertices_num(obj)
             poly_num = self.scene_input.get_polygons_num(obj)
-            has_geometry = bname not in ["INST", "BAI", "PTH", "PKG", "TRAFL"] and (bname == "RAIL" or (vert_num > 0 and poly_num > 0))
+            # as PSDLWriter.read_blocks (PERIM: a manual perimeter, without faces)
+            has_geometry = bname not in ["INST", "BAI", "PTH", "PKG", "TRAFL"] and (bname == "RAIL" or (vert_num > 0 and poly_num > 0)
+                                                                                  or (bname == "PERIM" and vert_num > 0))
             if has_geometry:
                 n = self.get_block_number(obj)
                 if n not in blocks2[n - 1]:

@@ -183,7 +183,9 @@ class PSDLWriter:
             bname = self.utils.get_object_type(obj)
             vert_num = self.scene_input.get_vertices_num(obj)
             poly_num = self.scene_input.get_polygons_num(obj)
-            has_geometry = bname not in ["INST", "BAI", "PTH", "PKG", "TRAFL"] and (bname == "RAIL" or (vert_num > 0 and poly_num > 0))
+            # PERIM: the perimeter of the block set manually (its vertices in the order of the file, no faces)
+            has_geometry = bname not in ["INST", "BAI", "PTH", "PKG", "TRAFL"] and (bname == "RAIL" or (vert_num > 0 and poly_num > 0)
+                                                                                  or (bname == "PERIM" and vert_num > 0))
             if has_geometry:
                 n = self.utils.get_block_number(obj)
                 blocks_temp[n-1].append(Attribute(geo=obj, mat_id=0))
@@ -620,6 +622,14 @@ class PSDLWriter:
             return None
 
     def get_perimeter(self, the_block, bi, precise):
+        perimeter, positions = self.trace_perimeter(the_block, bi, precise)
+        if perimeter is None:
+            return None
+        return self.simplify_perimeter(perimeter, positions, bi)
+
+    def trace_perimeter(self, the_block, bi, precise):
+        # the perimeter followed around the faces of the block (the inner vertices of the divided road ends excluded),
+        # with its positions: (None, None) if the block has no faces
         perimeter = []
         perimeter_v = []
         perimeter0 = []
@@ -658,7 +668,7 @@ class PSDLWriter:
             new_block_verts_2.append(self.get_vertex_2(new_block, v))
         bm_center = self.bmesh_center_xy(new_block)
         if bm_center is None:
-            return None
+            return None, None
         cx = bm_center[0]
         cy = bm_center[1]
         if precise:
@@ -747,6 +757,10 @@ class PSDLWriter:
             if not pv.ID in excl_v:
                 perimeter_clean.append(pv)
                 perimeter_v_clean.append(pos)
+        return perimeter_clean, perimeter_v_clean
+
+    def simplify_perimeter(self, perimeter_clean, perimeter_v_clean, bi):
+        # the points of the perimeter that lead to other blocks, and the others where it turns (the spikes removed)
         perimeter_f = []
         perimeter_v_f = []
         for i in range(len(perimeter_clean)):
@@ -769,6 +783,31 @@ class PSDLWriter:
                 perimeter_v_f.append(perimeter_v_clean[i])
         self.remove_spikes(perimeter_f, perimeter_v_f)
         return perimeter_f
+
+    def get_manual_perimeter(self, perim_part, bi):
+        # the perimeter set manually (a PERIM part): its points in the order of the file, the blocks sharing them as
+        # neighbours; with the property "simplify" the points are dropped as for the perimeter found from the faces (it
+        # is then the traced perimeter, in the order of the file)
+        geo = perim_part.geo
+        positions = [self.scene_input.get_vertex(geo, i) for i in range(self.scene_input.get_vertices_num(geo))]
+        perimeter = []
+        for pos in positions:
+            vid = self.get_vert_index(pos)
+            perimeter.append(PerimeterVert(vid, list(self.vertices_blocks[vid - 1])))
+        simplify = bool(int(self.scene_input.get_property_container(geo).get("simplify", "0")))
+        if simplify:
+            perimeter.reverse()
+            positions.reverse()
+            res = self.simplify_perimeter(perimeter, positions, bi)
+            res.reverse()
+            return res
+        for pv in perimeter:
+            p_blocks = []
+            for pb in pv.blocks:
+                if pb != bi and pb not in p_blocks:
+                    p_blocks.append(pb)
+            pv.blocks = p_blocks
+        return perimeter
 
     def check_point_plane_dist(self, x1, x2, x3, x4, y1, y2, y3, y4, z1, z2, z3, z4):
         a = (y3-y2)*(z4-z2)-(y4-y2)*(z3-z2)
@@ -1605,21 +1644,27 @@ class PSDLWriter:
                                            "IS", "SW", "CW",
                                            "SLIVER", ["FAC", "FACB"], "ROOF",
                                            ""], self.blocks[bi])
+            # the manual perimeter is not an attribute
+            perim_parts = [bp for bp in b if self.utils.get_object_type(bp.geo) == "PERIM"]
+            b = [bp for bp in b if self.utils.get_object_type(bp.geo) != "PERIM"]
             self.block_flags.append(BlockFlag())
             self.perim_points = []
             self.shorts_lists = []
             # when the errors are collected (see report.collecting), a block that fails is written empty (the other
             # blocks keep their index) and the export goes on, so that every error is reported at once
             try:
-                try:
-                    self.perim_points = self.get_perimeter(b, bi, False)
-                except Exception:
-                    print("Perimeter Error, retrying with more precision...")
-                    self.perim_points = self.get_perimeter(b, bi, True)
+                if len(perim_parts) > 0:
+                    self.perim_points = self.get_manual_perimeter(perim_parts[0], bi)
+                else:
+                    try:
+                        self.perim_points = self.get_perimeter(b, bi, False)
+                    except Exception:
+                        print("Perimeter Error, retrying with more precision...")
+                        self.perim_points = self.get_perimeter(b, bi, True)
 
-                if self.perim_points is None:
-                    raise Exception("Perimeter error on block " + str(bi+1))
-                self.perim_points.reverse()  # Picked it clockwise, as said in the wiki, but it's counterclockwise actually
+                    if self.perim_points is None:
+                        raise Exception("Perimeter error on block " + str(bi+1))
+                    self.perim_points.reverse()  # Picked it clockwise, as said in the wiki, but it's counterclockwise actually
                 self.process_block_parts(b, bi)
             except Exception:
                 if not report.collecting():
