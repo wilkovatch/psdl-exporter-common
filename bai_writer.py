@@ -432,30 +432,24 @@ class BAIWriter:
         # It also excludes roads without traffic from the count.)
 
         # Find the opposite road
-        this_road_ok = False
-        opposite_road_index = index_in_intersection + 2
-        if opposite_road_index >= len(intersection_roads):
-            # Avoid overflow
-            opposite_road_index -= len(intersection_roads)
-        while not this_road_ok:
-            # Check the current road
-            i = intersection_roads[opposite_road_index]
-            road_2 = None
-            for temp_road in self.roads_finished:
-                if i == self.prop(temp_road)["id"]:
-                    road_2 = temp_road
-            road_2_properties = self.prop(road_2)
-            n_lanes_A = road_2_properties["left_lanes"]
-            n_lanes_B = road_2_properties["right_lanes"]
-            traf_type = int(road_2_properties["traffic_type"])
-            if traf_type == 3 and (n_lanes_A == "0" or n_lanes_B == "0"):
-                # Skip roads without traffic
-                opposite_road_index += 1
-                if opposite_road_index >= len(intersection_roads):
-                    opposite_road_index -= len(intersection_roads)
-            else:
-                # Opposite road found
-                this_road_ok = True
+        if not intersection_roads:
+            report.warning("no roads available for automatic traffic light placement")
+            return (np.zeros(3), np.zeros(3))
+        road_2_properties = None
+        for step in range(len(intersection_roads)):
+            opposite_road_index = (index_in_intersection + 2 + step) % len(intersection_roads)
+            road_id = intersection_roads[opposite_road_index]
+            road_2 = next((r for r in self.roads_finished if self.prop(r)["id"] == road_id), None)
+            if road_2 is None:
+                continue
+            candidate = self.prop(road_2)
+            if int(candidate["traffic_type"]) == 3 and (candidate["left_lanes"] == "0" or candidate["right_lanes"] == "0"):
+                continue
+            road_2_properties = candidate
+            break
+        if road_2_properties is None:
+            report.warning("no traffic road available for automatic traffic light placement")
+            return (np.zeros(3), np.zeros(3))
 
         # Place the traffic light, near the curb of the opposite road, on the side of the lanes leaving the intersection
         geo_2 = self.geometries[road_2_properties["id"]]

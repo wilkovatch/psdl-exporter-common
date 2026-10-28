@@ -17,6 +17,10 @@ class PATHSETWriter:
         pr = self.scene_input.get_property_container(obj)
         typ = self.utils.get_object_type(obj)
         if typ == "PTH":
+            if pr["flags"] == "2":
+                self.types.append(pr["object"] + ".2")
+                self.totobjs.append([obj])
+                return
             found = False
             object_and_flags = pr["object"] + "." + pr["flags"]
             for it in range(len(self.types)):
@@ -33,7 +37,7 @@ class PATHSETWriter:
 
     def write_elem(self, i):
         file = self.file
-        object_and_flags = self.types[i].split(".")
+        object_and_flags = self.types[i].rsplit(".", 1)
         file.write_string32(object_and_flags[0])
         points = []
         typ = int(object_and_flags[1])
@@ -48,8 +52,8 @@ class PATHSETWriter:
                 rotpos = (math.cos(rot[2]), math.sin(rot[2]), 0)
                 points.append(np.subtract(pos, rotpos))
         elif typ == 2:
-            #TODO
-            raise Exception("type 2 prop not implemented")
+            obj = self.totobjs[i][0]
+            points = [self.scene_input.get_vertex(obj, j) for j in range(self.scene_input.get_vertices_num(obj))]
         file.write_uint32(len(points))
         file.write_uint32(0)
         for p in points:
@@ -58,7 +62,7 @@ class PATHSETWriter:
             file.write_float(p[2])
             file.write_float(p[1])
         file.write_byte(typ)
-        file.write_byte(0)  # spacing
+        file.write_byte(int(self.scene_input.get_property_container(self.totobjs[i][0]).get("spacing", 0)) if typ == 2 else 0)  # spacing
         file.write_uint16(0)
 
     def write(self):

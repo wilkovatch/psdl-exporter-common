@@ -32,13 +32,14 @@ class INSTWriter:
         iblock = self.utils.get_block_number(obj)
         obj_name = pr["object"]
         flags = int(pr.get("flags", 0))
-        self.export_elem(rot, scalex, scaley, scalez, origo, iblock, obj_name, flags)
+        axes = self.scene_input.get_instance_axes(obj) if hasattr(self.scene_input, "get_instance_axes") else None
+        self.export_elem(rot, scalex, scaley, scalez, origo, iblock, obj_name, flags, axes)
 
     def process_pkg_group(self, group):
         # the pkg is in coordinates relative to its pivot, 256 = visible from every angle
         self.export_elem([0, 0, 0], 1, 1, 1, group.pivot, group.block, group.stem, 256)
 
-    def export_elem(self, rot, scalex, scaley, scalez, origo, iblock, obj_name, flags):
+    def export_elem(self, rot, scalex, scaley, scalez, origo, iblock, obj_name, flags, axes=None):
         file = self.file
         self.object_names.add(obj_name.lower())
         rx = rot[0]
@@ -49,7 +50,20 @@ class INSTWriter:
         ib = self.utils.get_real_block_number(self.blocks, iblock)
         file.write_uint16(ib + 1)
         file.write_uint16(flags)
-        if (abs(1.0 - scalex) < 0.0001 and
+        simple_axes = axes is not None and abs(axes[2][0] + axes[0][2]) < 1e-6 and abs(axes[2][2] - axes[0][0]) < 1e-6 and abs(axes[0][1]) < 1e-6 and abs(axes[2][1]) < 1e-6 and all(
+            abs(a - b) < 1e-6 for a, b in zip(axes[1], (0, 1, 0))) and abs(sum(v*v for v in axes[0])-1) < 1e-6 and abs(sum(v*v for v in axes[2])-1) < 1e-6
+        if simple_axes:
+            file.write_byte(len(obj_name) + 129)
+            file.write_zero_terminated_string(obj_name)
+            file.write_float(axes[0][0])
+            file.write_float(axes[0][2] if abs(axes[0][2]) > 1e-12 else -1e-10)
+        elif axes is not None:
+            file.write_byte(len(obj_name) + 1)
+            file.write_zero_terminated_string(obj_name)
+            for axis in axes:
+                for value in axis:
+                    file.write_float(value)
+        elif (abs(1.0 - scalex) < 0.0001 and
             abs(1.0 - scaley) < 0.0001 and
             abs(1.0 - scalez) < 0.0001 and
             abs(rx) < 0.0002 and

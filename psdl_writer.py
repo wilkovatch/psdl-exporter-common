@@ -380,6 +380,8 @@ class PSDLWriter:
         swt = []
         cwt = []
         for pb in b:
+            if int(self.scene_input.get_property_container(pb.geo).get("disable", "0")):
+                continue
             pname = self.utils.get_object_type(pb.geo)
             if pname in ["IS", "CW", "SW"]:
                 mat = self.get_mat_list(pb.geo)[0]
@@ -406,6 +408,8 @@ class PSDLWriter:
             is_runs[t] = tuple(mats)
         res = []
         for pb in b:
+            if int(self.scene_input.get_property_container(pb.geo).get("disable", "0")):
+                continue
             pname = self.utils.get_object_type(pb.geo)
             if pname in ["ROADS", "ROADSN", "FAC", "SLIVER", "BLOCK", "ROOF", "RAIL", "RAILC"]:
                 res.append((pb, tuple(self.get_mat_list(pb.geo)), None))
@@ -421,7 +425,7 @@ class PSDLWriter:
                     res.append((pb, mats[:3], mats[3:7]))
                 else:
                     res.append((pb, mats, ()))
-        return [r for r in res if len(r[1]) > 0]
+        return [r for r in res if len(r[1]) > 0 and not int(self.scene_input.get_property_container(r[0].geo).get("disable", "0"))]
 
     def process_materials(self):
         print("processing materials...")
