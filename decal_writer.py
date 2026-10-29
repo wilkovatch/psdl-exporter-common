@@ -155,6 +155,8 @@ class DecalWriter:
             if self.utils.get_object_type(obj) != "DECAL":
                 continue
             pr = self.scene_input.get_property_container(obj)
+            if pr.get("strip_pairs") == "1":
+                continue
             points = [self.scene_input.get_vertex(obj, i) for i in range(self.scene_input.get_vertices_num(obj))]
             res.append((points, float(pr["width"]), pr["texture"], pr.get("original_name", pr["texture"])))
         for rail, rd_pr in self.rails:
@@ -180,6 +182,23 @@ class DecalWriter:
                         report.warning("the tiles of the decal " + name + " are stretched by the game")
                         break
                 paths.append((texture, path))
+        # Optional explicit edge pairs from evaluated editor geometry. Legacy centerline inputs remain unchanged.
+        for obj in self.scene_input.get_object_list():
+            pr = self.scene_input.get_property_container(obj)
+            if self.utils.get_object_type(obj) != "DECAL" or pr.get("strip_pairs") != "1":
+                continue
+            texture = pr.get("texture", "")
+            if not texture or len(texture) > MAX_NAME_LENGTH:
+                report.warning("the decal has a missing or overlong texture name, it is not exported")
+                continue
+            points = [np.array(self.scene_input.get_vertex(obj, i), dtype=float) for i in range(self.scene_input.get_vertices_num(obj))]
+            if len(points) < 4 or len(points) % 2:
+                report.warning("the decal has invalid edge pairs, it is not exported")
+                continue
+            for i in range(0, len(points) - 2, 2):
+                path, _ = path_points(*points[i:i + 4])
+                if path is not None:
+                    paths.append((texture, path))
         if len(paths) == 0:
             # no stale decals from a previous export
             if os.path.exists(file_path):
